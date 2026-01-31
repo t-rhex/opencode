@@ -3,15 +3,8 @@ import { useCommand } from "@/context/command"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { usePlatform } from "@/context/platform"
 import { useLanguage } from "@/context/language"
-
-// Placeholder dialog components - to be implemented
-function DialogRemoteConnect() {
-  return <div>Remote Connect Dialog</div>
-}
-
-function DialogRemoteSessions() {
-  return <div>Remote Sessions Dialog</div>
-}
+import { DialogRemoteConnect } from "./dialog-remote-connect"
+import { DialogRemoteSessions } from "./dialog-remote-sessions"
 
 export function RemoteCommands() {
   const command = useCommand()
