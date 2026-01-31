@@ -62,13 +62,11 @@ export function AppBaseProviders(props: ParentProps) {
           <UiI18nBridge>
             <ErrorBoundary fallback={(error) => <ErrorPage error={error} />}>
               <DialogProvider>
-                <RemoteProvider>
-                  <MarkedProviderWithNativeParser>
-                    <DiffComponentProvider component={Diff}>
-                      <CodeComponentProvider component={Code}>{props.children}</CodeComponentProvider>
-                    </DiffComponentProvider>
-                  </MarkedProviderWithNativeParser>
-                </RemoteProvider>
+                <MarkedProviderWithNativeParser>
+                  <DiffComponentProvider component={Diff}>
+                    <CodeComponentProvider component={Code}>{props.children}</CodeComponentProvider>
+                  </DiffComponentProvider>
+                </MarkedProviderWithNativeParser>
               </DialogProvider>
             </ErrorBoundary>
           </UiI18nBridge>
@@ -122,7 +120,9 @@ export function AppInterface(props: { defaultUrl?: string }) {
                         <ModelsProvider>
                           <CommandProvider>
                             <HighlightsProvider>
-                              <Layout>{props.children}</Layout>
+                              <RemoteProvider>
+                                <Layout>{props.children}</Layout>
+                              </RemoteProvider>
                             </HighlightsProvider>
                           </CommandProvider>
                         </ModelsProvider>
