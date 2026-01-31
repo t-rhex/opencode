@@ -27,6 +27,7 @@ import { CommandProvider } from "@/context/command"
 import { LanguageProvider, useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
 import { HighlightsProvider } from "@/context/highlights"
+import { RemoteProvider } from "@/context/remote"
 import Layout from "@/pages/layout"
 import DirectoryLayout from "@/pages/directory-layout"
 import { ErrorPage } from "./pages/error"
@@ -61,11 +62,13 @@ export function AppBaseProviders(props: ParentProps) {
           <UiI18nBridge>
             <ErrorBoundary fallback={(error) => <ErrorPage error={error} />}>
               <DialogProvider>
-                <MarkedProviderWithNativeParser>
-                  <DiffComponentProvider component={Diff}>
-                    <CodeComponentProvider component={Code}>{props.children}</CodeComponentProvider>
-                  </DiffComponentProvider>
-                </MarkedProviderWithNativeParser>
+                <RemoteProvider>
+                  <MarkedProviderWithNativeParser>
+                    <DiffComponentProvider component={Diff}>
+                      <CodeComponentProvider component={Code}>{props.children}</CodeComponentProvider>
+                    </DiffComponentProvider>
+                  </MarkedProviderWithNativeParser>
+                </RemoteProvider>
               </DialogProvider>
             </ErrorBoundary>
           </UiI18nBridge>
