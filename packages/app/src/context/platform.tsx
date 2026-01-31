@@ -55,6 +55,45 @@ export type Platform = {
 
   /** Parse markdown to HTML using native parser (desktop only, returns unprocessed code blocks) */
   parseMarkdown?(markdown: string): Promise<string>
+
+  /** Whether remote connections are supported */
+  canRemote?: boolean
+
+  /** Connect to remote SSH host */
+  remoteConnect?(opts: { target: string; repo: string; ref: string; keyPath?: string }): Promise<{
+    url: string
+    password: string | null
+    session: {
+      id: string
+      target: string
+      repo: string
+      git_ref: string
+      port: number
+      local_port: number
+      started_at: string
+    }
+  }>
+
+  /** Disconnect from remote host */
+  remoteDisconnect?(): Promise<void>
+
+  /** List sessions on a remote host */
+  remoteListSessions?(
+    target: string,
+    keyPath?: string,
+  ): Promise<
+    Array<{
+      id: string
+      target: string
+      repo: string
+      git_ref: string
+      port: number
+      started_at: string
+    }>
+  >
+
+  /** Stop a session on a remote host */
+  remoteStopSession?(target: string, sessionId: string, keyPath?: string): Promise<void>
 }
 
 export const { use: usePlatform, provider: PlatformProvider } = createSimpleContext({

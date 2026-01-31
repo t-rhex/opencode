@@ -346,6 +346,29 @@ const createPlatform = (password: Accessor<string | null>): Platform => ({
   parseMarkdown: async (markdown: string) => {
     return invoke<string>("parse_markdown_command", { markdown })
   },
+
+  canRemote: true,
+
+  remoteConnect: async (opts) => {
+    return invoke("remote_connect", {
+      target: opts.target,
+      repo: opts.repo,
+      gitRef: opts.ref,
+      keyPath: opts.keyPath,
+    })
+  },
+
+  remoteDisconnect: async () => {
+    await invoke("remote_disconnect")
+  },
+
+  remoteListSessions: async (target, keyPath) => {
+    return invoke("remote_list_sessions", { target, keyPath })
+  },
+
+  remoteStopSession: async (target, sessionId, keyPath) => {
+    await invoke("remote_stop_session", { target, sessionId, keyPath })
+  },
 })
 
 createMenu()
