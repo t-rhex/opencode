@@ -3065,6 +3065,7 @@ dependencies = [
  "listeners",
  "objc2 0.6.3",
  "objc2-web-kit",
+ "rand 0.8.5",
  "reqwest",
  "semver",
  "serde",

@@ -2,6 +2,7 @@ mod cli;
 #[cfg(windows)]
 mod job_object;
 mod markdown;
+mod remote;
 mod window_customizer;
 
 use cli::{install_cli, sync_cli};
@@ -291,7 +292,11 @@ pub fn run() {
             ensure_server_ready,
             get_default_server_url,
             set_default_server_url,
-            markdown::parse_markdown_command
+            markdown::parse_markdown_command,
+            remote::remote_connect,
+            remote::remote_disconnect,
+            remote::remote_list_sessions,
+            remote::remote_stop_session
         ])
         .setup(move |app| {
             #[cfg(any(target_os = "linux", all(debug_assertions, windows)))]
@@ -299,8 +304,8 @@ pub fn run() {
 
             let app = app.handle().clone();
 
-            // Initialize log state
             app.manage(LogState(Arc::new(Mutex::new(VecDeque::new()))));
+            app.manage(remote::RemoteState::default());
 
             #[cfg(windows)]
             app.manage(JobObjectState::new());
