@@ -30,6 +30,18 @@ export async function createMenu() {
             text: t("desktop.menu.installCli"),
           }),
           await MenuItem.new({
+            action: () => {
+              window.dispatchEvent(new CustomEvent("opencode:remote-connect"))
+            },
+            text: t("desktop.remote.menu.connect"),
+          }),
+          await MenuItem.new({
+            action: () => {
+              window.dispatchEvent(new CustomEvent("opencode:remote-sessions"))
+            },
+            text: t("desktop.remote.menu.sessions"),
+          }),
+          await MenuItem.new({
             action: async () => window.location.reload(),
             text: t("desktop.menu.reloadWebview"),
           }),
