@@ -5,11 +5,13 @@ import { State } from "./state"
 import { iife } from "@/util/iife"
 import { GlobalBus } from "@/bus/global"
 import { Filesystem } from "@/util/filesystem"
+import { type IFilesystem, CurrentFilesystem } from "@/fs"
 
 interface Context {
   directory: string
   worktree: string
   project: Project.Info
+  fs: IFilesystem
 }
 const context = Context.create<Context>("instance")
 const cache = new Map<string, Promise<Context>>()
@@ -19,16 +21,35 @@ const disposal = {
 }
 
 export const Instance = {
-  async provide<R>(input: { directory: string; init?: () => Promise<any>; fn: () => R }): Promise<R> {
+  async provide<R>(input: { directory: string; fs?: IFilesystem; init?: () => Promise<any>; fn: () => R }): Promise<R> {
     let existing = cache.get(input.directory)
     if (!existing) {
       Log.Default.info("creating instance", { directory: input.directory })
       existing = iife(async () => {
-        const { project, sandbox } = await Project.fromDirectory(input.directory)
-        const ctx = {
+        const isRemote = CurrentFilesystem.isRemote()
+
+        let project: Project.Info
+        let worktree: string
+
+        if (isRemote) {
+          worktree = input.directory
+          project = {
+            id: "remote",
+            worktree: input.directory,
+            sandboxes: [],
+            time: { created: Date.now(), updated: Date.now() },
+          }
+        } else {
+          const result = await Project.fromDirectory(input.directory)
+          project = result.project
+          worktree = result.sandbox
+        }
+
+        const ctx: Context = {
           directory: input.directory,
-          worktree: sandbox,
+          worktree,
           project,
+          fs: input.fs ?? CurrentFilesystem.get(),
         }
         await context.provide(ctx, async () => {
           await input.init?.()
@@ -43,13 +64,25 @@ export const Instance = {
     })
   },
   get directory() {
+    if (CurrentFilesystem.isRemote()) {
+      const remoteDir = CurrentFilesystem.getRemoteDirectory()
+      if (remoteDir) return remoteDir
+    }
     return context.use().directory
   },
   get worktree() {
+    const isRemote = CurrentFilesystem.isRemote()
+    const remoteDir = CurrentFilesystem.getRemoteDirectory()
+    if (isRemote && remoteDir) {
+      return remoteDir
+    }
     return context.use().worktree
   },
   get project() {
     return context.use().project
+  },
+  get fs(): IFilesystem {
+    return CurrentFilesystem.get()
   },
   /**
    * Check if a path is within the project boundary.
@@ -79,6 +112,10 @@ export const Instance = {
         },
       },
     })
+  },
+  clearCache() {
+    cache.clear()
+    Log.Default.info("instance cache cleared")
   },
   async disposeAll() {
     if (disposal.all) return disposal.all

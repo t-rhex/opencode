@@ -5,6 +5,7 @@ import DESCRIPTION from "./ls.txt"
 import { Instance } from "../project/instance"
 import { Ripgrep } from "../file/ripgrep"
 import { assertExternalDirectory } from "./external-directory"
+import { LocalFilesystem } from "@/fs"
 
 export const IGNORE_PATTERNS = [
   "node_modules/",
@@ -54,11 +55,30 @@ export const ListTool = Tool.define("list", {
       },
     })
 
-    const ignoreGlobs = IGNORE_PATTERNS.map((p) => `!${p}*`).concat(params.ignore?.map((p) => `!${p}`) || [])
-    const files = []
-    for await (const file of Ripgrep.files({ cwd: searchPath, glob: ignoreGlobs, signal: ctx.abort })) {
-      files.push(file)
-      if (files.length >= LIMIT) break
+    const fs = Instance.fs
+    const isLocal = fs instanceof LocalFilesystem
+    const files: string[] = []
+
+    if (isLocal) {
+      const ignoreGlobs = IGNORE_PATTERNS.map((p) => `!${p}*`).concat(params.ignore?.map((p) => `!${p}`) || [])
+      for await (const file of Ripgrep.files({ cwd: searchPath, glob: ignoreGlobs, signal: ctx.abort })) {
+        files.push(file)
+        if (files.length >= LIMIT) break
+      }
+    } else {
+      const ignorePattern = IGNORE_PATTERNS.concat(params.ignore || [])
+        .map((p) => `-not -path '*/${p.replace(/\/$/, "")}/*'`)
+        .join(" ")
+      const cmd = `find "${searchPath}" -type f ${ignorePattern} 2>/dev/null | head -${LIMIT}`
+      const result = await fs.exec(cmd)
+      for (const line of result.stdout.trim().split("\n")) {
+        if (line) {
+          const relativePath = path.relative(searchPath, line)
+          if (relativePath && !relativePath.startsWith("..")) {
+            files.push(relativePath)
+          }
+        }
+      }
     }
 
     // Build directory structure

@@ -10,6 +10,15 @@ import { GlobalBus } from "@/bus/global"
 import { createOpencodeClient, type Event } from "@opencode-ai/sdk/v2"
 import type { BunWebSocketData } from "hono/bun"
 import { Flag } from "@/flag/flag"
+import { CurrentFilesystem, RemoteFilesystem } from "@/fs"
+
+export interface RemoteConfig {
+  host: string
+  username: string
+  port: number
+  privateKeyPath?: string
+  remoteDir?: string
+}
 
 await Log.init({
   print: process.argv.includes("--print-logs"),
@@ -19,6 +28,11 @@ await Log.init({
     return "INFO"
   })(),
 })
+
+if (process.env.OPENCODE_DIRECTORY) {
+  CurrentFilesystem.setRemoteMode(true, process.env.OPENCODE_DIRECTORY)
+  Log.Default.info("remote mode detected from OPENCODE_DIRECTORY", { directory: process.env.OPENCODE_DIRECTORY })
+}
 
 process.on("unhandledRejection", (e) => {
   Log.Default.error("rejection", {
@@ -38,6 +52,7 @@ GlobalBus.on("event", (event) => {
 })
 
 let server: Bun.Server<BunWebSocketData> | undefined
+let remoteConfig: RemoteConfig | undefined
 
 const eventStream = {
   abort: undefined as AbortController | undefined,
@@ -94,7 +109,7 @@ const startEventStream = (directory: string) => {
   })
 }
 
-startEventStream(process.cwd())
+startEventStream(process.env.OPENCODE_DIRECTORY || process.cwd())
 
 export const rpc = {
   async fetch(input: { url: string; method: string; headers: Record<string, string>; body?: string }) {
@@ -121,9 +136,43 @@ export const rpc = {
     server = Server.listen(input)
     return { url: server.url.toString() }
   },
+  async initRemote(config: RemoteConfig) {
+    remoteConfig = config
+
+    CurrentFilesystem.setRemoteMode(true, config.remoteDir)
+    Instance.clearCache()
+
+    const fs = new RemoteFilesystem({
+      host: config.host,
+      username: config.username,
+      port: config.port,
+      privateKeyPath: config.privateKeyPath,
+    })
+    await fs.connect()
+
+    if (config.remoteDir) {
+      const exists = await fs.exists(config.remoteDir)
+      if (!exists) {
+        CurrentFilesystem.setRemoteMode(false)
+        await fs.disconnect()
+        throw new Error(`Remote directory does not exist: ${config.remoteDir}`)
+      }
+      const stat = await fs.stat(config.remoteDir)
+      if (!stat.isDirectory) {
+        CurrentFilesystem.setRemoteMode(false)
+        await fs.disconnect()
+        throw new Error(`Remote path is not a directory: ${config.remoteDir}`)
+      }
+    }
+
+    CurrentFilesystem.set(fs)
+    Log.Default.info("remote filesystem connected", { host: config.host, port: config.port })
+    return { connected: true }
+  },
   async checkUpgrade(input: { directory: string }) {
     await Instance.provide({
       directory: input.directory,
+      fs: CurrentFilesystem.get(),
       init: InstanceBootstrap,
       fn: async () => {
         await upgrade().catch(() => {})
@@ -139,6 +188,8 @@ export const rpc = {
     if (eventStream.abort) eventStream.abort.abort()
     await Instance.disposeAll()
     if (server) server.stop(true)
+    const fs = CurrentFilesystem.get()
+    if (fs.disconnect) await fs.disconnect()
   },
 }
 

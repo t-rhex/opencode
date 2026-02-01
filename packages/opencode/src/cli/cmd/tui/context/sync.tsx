@@ -28,7 +28,7 @@ import { useExit } from "./exit"
 import { useArgs } from "./args"
 import { batch, onMount } from "solid-js"
 import { Log } from "@/util/log"
-import type { Path } from "@opencode-ai/sdk"
+import type { Path } from "@opencode-ai/sdk/v2"
 
 export const { use: useSync, provider: SyncProvider } = createSimpleContext({
   name: "Sync",
@@ -102,7 +102,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       mcp_resource: {},
       formatter: [],
       vcs: undefined,
-      path: { state: "", config: "", worktree: "", directory: "" },
+      path: { home: "", state: "", config: "", worktree: "", directory: "", remote: false },
     })
 
     const sdk = useSDK()

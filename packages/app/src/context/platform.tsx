@@ -1,6 +1,40 @@
 import { createSimpleContext } from "@opencode-ai/ui/context"
 import { AsyncStorage, SyncStorage } from "@solid-primitives/storage"
 
+export type SavedConnection = {
+  id: string
+  name: string
+  target: string
+  port?: number
+  keyPath?: string
+  lastDirectory?: string
+}
+
+export type DirectoryEntry = {
+  name: string
+  isDir: boolean
+  path: string
+}
+
+export type BrowseResult = {
+  entries: DirectoryEntry[]
+  path: string
+}
+
+export type RemoteConnectResult = {
+  url: string
+  password: string | null
+  session: {
+    id: string
+    target: string
+    repo: string
+    git_ref: string
+    port: number
+    local_port: number
+    started_at: string
+  }
+}
+
 export type Platform = {
   /** Platform discriminator */
   platform: "web" | "desktop"
@@ -59,20 +93,15 @@ export type Platform = {
   /** Whether remote connections are supported */
   canRemote?: boolean
 
-  /** Connect to remote SSH host */
-  remoteConnect?(opts: { target: string; repo: string; ref: string; keyPath?: string }): Promise<{
-    url: string
-    password: string | null
-    session: {
-      id: string
-      target: string
-      repo: string
-      git_ref: string
-      port: number
-      local_port: number
-      started_at: string
-    }
-  }>
+  /** Connect to remote SSH host with repo clone */
+  remoteConnect?(opts: { target: string; repo: string; ref: string; keyPath?: string }): Promise<RemoteConnectResult>
+
+  /** Connect to remote SSH host with existing directory */
+  remoteConnectDirectory?(opts: { target: string; path: string; keyPath?: string }): Promise<RemoteConnectResult>
+  remoteCreateDirectory?(target: string, path: string, keyPath?: string): Promise<string>
+
+  /** Browse remote directory */
+  remoteBrowseDirectory?(target: string, path: string, keyPath?: string): Promise<BrowseResult>
 
   /** Disconnect from remote host */
   remoteDisconnect?(): Promise<void>

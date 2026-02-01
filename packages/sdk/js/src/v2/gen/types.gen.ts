@@ -2105,6 +2105,7 @@ export type Path = {
   config: string
   worktree: string
   directory: string
+  remote: boolean
 }
 
 export type VcsInfo = {

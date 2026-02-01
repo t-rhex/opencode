@@ -1,6 +1,5 @@
 import z from "zod"
 import * as path from "path"
-import * as fs from "fs/promises"
 import { Tool } from "./tool"
 import { Bus } from "../bus"
 import { FileWatcher } from "../file/watcher"
@@ -90,13 +89,13 @@ export const ApplyPatchTool = Tool.define("apply_patch", {
         }
 
         case "update": {
-          // Check if file exists for update
-          const stats = await fs.stat(filePath).catch(() => null)
-          if (!stats || stats.isDirectory()) {
+          const instanceFs = Instance.fs
+          const stats = await instanceFs.stat(filePath).catch(() => null)
+          if (!stats || stats.isDirectory) {
             throw new Error(`apply_patch verification failed: Failed to read file to update: ${filePath}`)
           }
 
-          const oldContent = await fs.readFile(filePath, "utf-8")
+          const oldContent = await instanceFs.read(filePath)
           let newContent = oldContent
 
           // Apply the update chunks to get new content
@@ -135,7 +134,7 @@ export const ApplyPatchTool = Tool.define("apply_patch", {
         }
 
         case "delete": {
-          const contentToDelete = await fs.readFile(filePath, "utf-8").catch((error) => {
+          const contentToDelete = await Instance.fs.read(filePath).catch((error) => {
             throw new Error(`apply_patch verification failed: ${error}`)
           })
           const deleteDiff = trimDiff(createTwoFilesPatch(filePath, filePath, contentToDelete, ""))
@@ -192,29 +191,29 @@ export const ApplyPatchTool = Tool.define("apply_patch", {
       switch (change.type) {
         case "add":
           // Create parent directories (recursive: true is safe on existing/root dirs)
-          await fs.mkdir(path.dirname(change.filePath), { recursive: true })
-          await fs.writeFile(change.filePath, change.newContent, "utf-8")
+          await Instance.fs.mkdir(path.dirname(change.filePath), true)
+          await Instance.fs.write(change.filePath, change.newContent)
           updates.push({ file: change.filePath, event: "add" })
           break
 
         case "update":
-          await fs.writeFile(change.filePath, change.newContent, "utf-8")
+          await Instance.fs.write(change.filePath, change.newContent)
           updates.push({ file: change.filePath, event: "change" })
           break
 
         case "move":
           if (change.movePath) {
             // Create parent directories (recursive: true is safe on existing/root dirs)
-            await fs.mkdir(path.dirname(change.movePath), { recursive: true })
-            await fs.writeFile(change.movePath, change.newContent, "utf-8")
-            await fs.unlink(change.filePath)
+            await Instance.fs.mkdir(path.dirname(change.movePath), true)
+            await Instance.fs.write(change.movePath, change.newContent)
+            await Instance.fs.unlink(change.filePath)
             updates.push({ file: change.filePath, event: "unlink" })
             updates.push({ file: change.movePath, event: "add" })
           }
           break
 
         case "delete":
-          await fs.unlink(change.filePath)
+          await Instance.fs.unlink(change.filePath)
           updates.push({ file: change.filePath, event: "unlink" })
           break
       }

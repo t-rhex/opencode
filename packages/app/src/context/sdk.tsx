@@ -12,14 +12,15 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
     const globalSDK = useGlobalSDK()
 
     const directory = createMemo(() => props.directory)
-    const client = createMemo(() =>
-      createOpencodeClient({
+    const client = createMemo(() => {
+      console.log(`[SDK] Creating client with directory: ${directory()}, url: ${globalSDK.url}`)
+      return createOpencodeClient({
         baseUrl: globalSDK.url,
         fetch: platform.fetch,
         directory: directory(),
         throwOnError: true,
-      }),
-    )
+      })
+    })
 
     const emitter = createGlobalEmitter<{
       [key in Event["type"]]: Extract<Event, { type: key }>

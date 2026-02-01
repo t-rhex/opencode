@@ -315,7 +315,20 @@ const createPlatform = (password: Accessor<string | null>): Platform => ({
 
   // @ts-expect-error
   fetch: (input, init) => {
-    const pw = password()
+    const getPassword = () => {
+      const url = typeof input === "string" ? input : input instanceof Request ? input.url : ""
+      if (url && window.__OPENCODE__?.serverPasswords) {
+        try {
+          const u = new URL(url)
+          const base = `${u.protocol}//${u.host}`
+          const pw = window.__OPENCODE__.serverPasswords.get(base)
+          if (pw) return pw
+        } catch {}
+      }
+      return password()
+    }
+
+    const pw = getPassword()
 
     const addHeader = (headers: Headers, password: string) => {
       headers.append("Authorization", `Basic ${btoa(`opencode:${password}`)}`)
@@ -350,12 +363,26 @@ const createPlatform = (password: Accessor<string | null>): Platform => ({
   canRemote: true,
 
   remoteConnect: async (opts) => {
-    return invoke("remote_connect", {
+    const result = await invoke<{
+      url: string
+      password: string | null
+      session: {
+        id: string
+        target: string
+        repo: string
+        git_ref: string
+        port: number
+        local_port: number
+        started_at: string
+      }
+    }>("remote_connect", {
       target: opts.target,
       repo: opts.repo,
       gitRef: opts.ref,
       keyPath: opts.keyPath,
     })
+    console.log("[Desktop] remote_connect result:", JSON.stringify(result, null, 2))
+    return result
   },
 
   remoteDisconnect: async () => {
@@ -368,6 +395,35 @@ const createPlatform = (password: Accessor<string | null>): Platform => ({
 
   remoteStopSession: async (target, sessionId, keyPath) => {
     await invoke("remote_stop_session", { target, sessionId, keyPath })
+  },
+
+  remoteBrowseDirectory: async (target, path, keyPath) => {
+    return invoke("remote_browse_directory", { target, path, keyPath })
+  },
+
+  remoteConnectDirectory: async (opts) => {
+    const result = await invoke<{
+      url: string
+      password: string | null
+      session: {
+        id: string
+        target: string
+        repo: string
+        git_ref: string
+        port: number
+        local_port: number
+        started_at: string
+      }
+    }>("remote_connect_directory", {
+      target: opts.target,
+      path: opts.path,
+      keyPath: opts.keyPath,
+    })
+    console.log("[Desktop] remote_connect_directory result:", JSON.stringify(result, null, 2))
+    return result
+  },
+  remoteCreateDirectory: async (target, path, keyPath) => {
+    return await invoke<string>("remote_create_directory", { target, path, keyPath })
   },
 })
 
@@ -398,9 +454,12 @@ render(() => {
       <AppBaseProviders>
         <ServerGate>
           {(data) => {
-            setServerPassword(data().password)
+            const pw = data().password
+            setServerPassword(pw)
             window.__OPENCODE__ ??= {}
-            window.__OPENCODE__.serverPassword = data().password ?? undefined
+            window.__OPENCODE__.serverPassword = pw ?? undefined
+            window.__OPENCODE__.serverPasswords ??= new Map()
+            if (pw) window.__OPENCODE__.serverPasswords.set(data().url, pw)
 
             return <AppInterface defaultUrl={data().url} />
           }}

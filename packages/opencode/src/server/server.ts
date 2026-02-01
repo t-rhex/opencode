@@ -14,6 +14,7 @@ import { LSP } from "../lsp"
 import { Format } from "../format"
 import { TuiRoutes } from "./routes/tui"
 import { Instance } from "../project/instance"
+import { CurrentFilesystem } from "../fs"
 import { Vcs } from "../project/vcs"
 import { Agent } from "../agent/agent"
 import { Skill } from "../skill/skill"
@@ -80,6 +81,8 @@ export namespace Server {
         .use((c, next) => {
           const password = Flag.OPENCODE_SERVER_PASSWORD
           if (!password) return next()
+          const authQuery = c.req.query("auth")
+          if (authQuery === password) return next()
           const username = Flag.OPENCODE_SERVER_USERNAME ?? "opencode"
           return basicAuth({ username, password })(c, next)
         })
@@ -185,14 +188,15 @@ export namespace Server {
           },
         )
         .use(async (c, next) => {
-          let directory = c.req.query("directory") || c.req.header("x-opencode-directory") || process.cwd()
+          const headerDir = c.req.header("x-opencode-directory")
+          const envDir = process.env.OPENCODE_DIRECTORY
+          let directory = c.req.query("directory") || headerDir || envDir || process.cwd()
           try {
             directory = decodeURIComponent(directory)
-          } catch {
-            // fallback to original value
-          }
+          } catch {}
           return Instance.provide({
             directory,
+            fs: CurrentFilesystem.get(),
             init: InstanceBootstrap,
             async fn() {
               return next()
@@ -266,6 +270,7 @@ export namespace Server {
                           config: z.string(),
                           worktree: z.string(),
                           directory: z.string(),
+                          remote: z.boolean(),
                         })
                         .meta({
                           ref: "Path",
@@ -283,6 +288,7 @@ export namespace Server {
               config: Global.Path.config,
               worktree: Instance.worktree,
               directory: Instance.directory,
+              remote: CurrentFilesystem.isRemote(),
             })
           },
         )

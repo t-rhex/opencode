@@ -18,10 +18,10 @@ import { useDialog } from "../../ui/dialog"
 
 type PermissionStage = "permission" | "always" | "reject"
 
-function normalizePath(input?: string) {
+function normalizePath(input?: string, basePath?: string) {
   if (!input) return ""
 
-  const cwd = process.cwd()
+  const cwd = basePath || process.cwd()
   const home = Global.Path.home
   const absolute = path.isAbsolute(input) ? input : path.resolve(cwd, input)
   const relative = path.relative(cwd, absolute)
@@ -34,6 +34,12 @@ function normalizePath(input?: string) {
     return absolute.replace(home, "~")
   }
   return absolute
+}
+
+function useNormalizePath() {
+  const sync = useSync()
+  const worktree = sync.data.path.worktree || sync.data.path.directory
+  return (input?: string) => normalizePath(input, worktree)
 }
 
 function filetype(input?: string) {
@@ -50,6 +56,7 @@ function EditBody(props: { request: PermissionRequest }) {
   const syntax = themeState.syntax
   const sync = useSync()
   const dimensions = useTerminalDimensions()
+  const normalize = useNormalizePath()
 
   const filepath = createMemo(() => (props.request.metadata?.filepath as string) ?? "")
   const diff = createMemo(() => (props.request.metadata?.diff as string) ?? "")
@@ -66,7 +73,7 @@ function EditBody(props: { request: PermissionRequest }) {
     <box flexDirection="column" gap={1}>
       <box flexDirection="row" gap={1} paddingLeft={1}>
         <text fg={theme.textMuted}>{"→"}</text>
-        <text fg={theme.textMuted}>Edit {normalizePath(filepath())}</text>
+        <text fg={theme.textMuted}>Edit {normalize(filepath())}</text>
       </box>
       <Show when={diff()}>
         <scrollbox height="100%">
@@ -119,6 +126,7 @@ function TextBody(props: { title: string; description?: string; icon?: string })
 export function PermissionPrompt(props: { request: PermissionRequest }) {
   const sdk = useSDK()
   const sync = useSync()
+  const normalize = useNormalizePath()
   const [store, setStore] = createStore({
     stage: "permission" as PermissionStage,
   })
@@ -203,7 +211,7 @@ export function PermissionPrompt(props: { request: PermissionRequest }) {
                     <EditBody request={props.request} />
                   </Match>
                   <Match when={props.request.permission === "read"}>
-                    <TextBody icon="→" title={`Read ` + normalizePath(input().filePath as string)} />
+                    <TextBody icon="→" title={`Read ` + normalize(input().filePath as string)} />
                   </Match>
                   <Match when={props.request.permission === "glob"}>
                     <TextBody icon="✱" title={`Glob "` + (input().pattern ?? "") + `"`} />
@@ -212,7 +220,7 @@ export function PermissionPrompt(props: { request: PermissionRequest }) {
                     <TextBody icon="✱" title={`Grep "` + (input().pattern ?? "") + `"`} />
                   </Match>
                   <Match when={props.request.permission === "list"}>
-                    <TextBody icon="→" title={`List ` + normalizePath(input().path as string)} />
+                    <TextBody icon="→" title={`List ` + normalize(input().path as string)} />
                   </Match>
                   <Match when={props.request.permission === "bash"}>
                     <TextBody
@@ -251,7 +259,7 @@ export function PermissionPrompt(props: { request: PermissionRequest }) {
                           : undefined
 
                       const raw = parent ?? filepath ?? derived
-                      const dir = normalizePath(raw)
+                      const dir = normalize(raw)
 
                       return <TextBody icon="←" title={`Access external directory ` + dir} />
                     })()}

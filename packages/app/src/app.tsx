@@ -28,6 +28,7 @@ import { LanguageProvider, useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
 import { HighlightsProvider } from "@/context/highlights"
 import { RemoteProvider } from "@/context/remote"
+import { ConnectionsProvider } from "@/context/connections"
 import Layout from "@/pages/layout"
 import DirectoryLayout from "@/pages/directory-layout"
 import { ErrorPage } from "./pages/error"
@@ -44,7 +45,12 @@ function UiI18nBridge(props: ParentProps) {
 
 declare global {
   interface Window {
-    __OPENCODE__?: { updaterEnabled?: boolean; serverPassword?: string; deepLinks?: string[] }
+    __OPENCODE__?: {
+      updaterEnabled?: boolean
+      serverPassword?: string
+      serverPasswords?: Map<string, string>
+      deepLinks?: string[]
+    }
   }
 }
 
@@ -120,9 +126,11 @@ export function AppInterface(props: { defaultUrl?: string }) {
                         <ModelsProvider>
                           <CommandProvider>
                             <HighlightsProvider>
-                              <RemoteProvider>
-                                <Layout>{props.children}</Layout>
-                              </RemoteProvider>
+                              <ConnectionsProvider>
+                                <RemoteProvider>
+                                  <Layout>{props.children}</Layout>
+                                </RemoteProvider>
+                              </ConnectionsProvider>
                             </HighlightsProvider>
                           </CommandProvider>
                         </ModelsProvider>

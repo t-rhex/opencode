@@ -6,6 +6,7 @@ import DESCRIPTION from "./grep.txt"
 import { Instance } from "../project/instance"
 import path from "path"
 import { assertExternalDirectory } from "./external-directory"
+import { LocalFilesystem } from "@/fs"
 
 const MAX_LINE_LENGTH = 2000
 
@@ -36,27 +37,44 @@ export const GrepTool = Tool.define("grep", {
     searchPath = path.isAbsolute(searchPath) ? searchPath : path.resolve(Instance.directory, searchPath)
     await assertExternalDirectory(ctx, searchPath, { kind: "directory" })
 
-    const rgPath = await Ripgrep.filepath()
-    const args = ["-nH", "--hidden", "--no-messages", "--field-match-separator=|", "--regexp", params.pattern]
-    if (params.include) {
-      args.push("--glob", params.include)
+    const fs = Instance.fs
+    const isLocal = fs instanceof LocalFilesystem
+
+    let output = ""
+    let exitCode = 0
+    let hasErrors = false
+
+    if (isLocal) {
+      const rgPath = await Ripgrep.filepath()
+      const args = ["-nH", "--hidden", "--no-messages", "--field-match-separator=|", "--regexp", params.pattern]
+      if (params.include) {
+        args.push("--glob", params.include)
+      }
+      args.push(searchPath)
+
+      const proc = Bun.spawn([rgPath, ...args], {
+        stdout: "pipe",
+        stderr: "pipe",
+        signal: ctx.abort,
+      })
+
+      output = await new Response(proc.stdout).text()
+      const errorOutput = await new Response(proc.stderr).text()
+      exitCode = await proc.exited
+      hasErrors = exitCode === 2
+
+      if (exitCode !== 0 && exitCode !== 2) {
+        throw new Error(`ripgrep failed: ${errorOutput}`)
+      }
+    } else {
+      const includeArg = params.include ? `--include='${params.include}'` : ""
+      const cmd = `grep -rnH ${includeArg} -E '${params.pattern.replace(/'/g, "'\\''")}' "${searchPath}" 2>/dev/null || true`
+      const result = await fs.exec(cmd)
+      output = result.stdout
+      exitCode = result.exitCode
     }
-    args.push(searchPath)
 
-    const proc = Bun.spawn([rgPath, ...args], {
-      stdout: "pipe",
-      stderr: "pipe",
-      signal: ctx.abort,
-    })
-
-    const output = await new Response(proc.stdout).text()
-    const errorOutput = await new Response(proc.stderr).text()
-    const exitCode = await proc.exited
-
-    // Exit codes: 0 = matches found, 1 = no matches, 2 = errors (but may still have matches)
-    // With --no-messages, we suppress error output but still get exit code 2 for broken symlinks etc.
-    // Only fail if exit code is 2 AND no output was produced
-    if (exitCode === 1 || (exitCode === 2 && !output.trim())) {
+    if (exitCode === 1 || !output.trim()) {
       return {
         title: params.pattern,
         metadata: { matches: 0, truncated: false },
@@ -64,27 +82,24 @@ export const GrepTool = Tool.define("grep", {
       }
     }
 
-    if (exitCode !== 0 && exitCode !== 2) {
-      throw new Error(`ripgrep failed: ${errorOutput}`)
-    }
-
-    const hasErrors = exitCode === 2
-
-    // Handle both Unix (\n) and Windows (\r\n) line endings
     const lines = output.trim().split(/\r?\n/)
-    const matches = []
+    const matches: { path: string; modTime: number; lineNum: number; lineText: string }[] = []
 
     for (const line of lines) {
       if (!line) continue
 
-      const [filePath, lineNumStr, ...lineTextParts] = line.split("|")
-      if (!filePath || !lineNumStr || lineTextParts.length === 0) continue
+      const sepChar = isLocal ? "|" : ":"
+      const parts = line.split(sepChar)
+      if (parts.length < 3) continue
+
+      const filePath = parts[0]
+      const lineNumStr = parts[1]
+      const lineText = parts.slice(2).join(sepChar)
 
       const lineNum = parseInt(lineNumStr, 10)
-      const lineText = lineTextParts.join("|")
+      if (isNaN(lineNum)) continue
 
-      const file = Bun.file(filePath)
-      const stats = await file.stat().catch(() => null)
+      const stats = await fs.stat(filePath).catch(() => null)
       if (!stats) continue
 
       matches.push({

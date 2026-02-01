@@ -46,6 +46,7 @@ import { LLM } from "./llm"
 import { iife } from "@/util/iife"
 import { Shell } from "@/shell/shell"
 import { Truncate } from "@/tool/truncation"
+import { CurrentFilesystem, LocalFilesystem } from "@/fs"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -1484,64 +1485,103 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     const matchingInvocation = invocations[shellName] ?? invocations[""]
     const args = matchingInvocation?.args
 
-    const proc = spawn(shell, args, {
-      cwd: Instance.directory,
-      detached: process.platform !== "win32",
-      stdio: ["ignore", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        TERM: "dumb",
-      },
-    })
-
     let output = ""
-
-    proc.stdout?.on("data", (chunk) => {
-      output += chunk.toString()
-      if (part.state.status === "running") {
-        part.state.metadata = {
-          output: output,
-          description: "",
-        }
-        Session.updatePart(part)
-      }
-    })
-
-    proc.stderr?.on("data", (chunk) => {
-      output += chunk.toString()
-      if (part.state.status === "running") {
-        part.state.metadata = {
-          output: output,
-          description: "",
-        }
-        Session.updatePart(part)
-      }
-    })
-
     let aborted = false
-    let exited = false
 
-    const kill = () => Shell.killTree(proc, { exited: () => exited })
+    const fs = Instance.fs
+    const isLocal = fs instanceof LocalFilesystem
 
-    if (abort.aborted) {
-      aborted = true
-      await kill()
-    }
-
-    const abortHandler = () => {
-      aborted = true
-      void kill()
-    }
-
-    abort.addEventListener("abort", abortHandler, { once: true })
-
-    await new Promise<void>((resolve) => {
-      proc.on("close", () => {
-        exited = true
-        abort.removeEventListener("abort", abortHandler)
-        resolve()
+    if (isLocal) {
+      const proc = spawn(shell, args, {
+        cwd: Instance.directory,
+        detached: process.platform !== "win32",
+        stdio: ["ignore", "pipe", "pipe"],
+        env: {
+          ...process.env,
+          TERM: "dumb",
+        },
       })
-    })
+
+      proc.stdout?.on("data", (chunk) => {
+        output += chunk.toString()
+        if (part.state.status === "running") {
+          part.state.metadata = {
+            output: output,
+            description: "",
+          }
+          Session.updatePart(part)
+        }
+      })
+
+      proc.stderr?.on("data", (chunk) => {
+        output += chunk.toString()
+        if (part.state.status === "running") {
+          part.state.metadata = {
+            output: output,
+            description: "",
+          }
+          Session.updatePart(part)
+        }
+      })
+
+      let exited = false
+
+      const kill = () => Shell.killTree(proc, { exited: () => exited })
+
+      if (abort.aborted) {
+        aborted = true
+        await kill()
+      }
+
+      const abortHandler = () => {
+        aborted = true
+        void kill()
+      }
+
+      abort.addEventListener("abort", abortHandler, { once: true })
+
+      await new Promise<void>((resolve) => {
+        proc.on("close", () => {
+          exited = true
+          abort.removeEventListener("abort", abortHandler)
+          resolve()
+        })
+      })
+    } else {
+      const abortHandler = () => {
+        aborted = true
+      }
+      abort.addEventListener("abort", abortHandler, { once: true })
+
+      if (!abort.aborted) {
+        await fs.execStream(
+          input.command,
+          { cwd: Instance.directory, timeout: 120000 },
+          (chunk) => {
+            output += chunk
+            if (part.state.status === "running") {
+              part.state.metadata = {
+                output: output,
+                description: "",
+              }
+              Session.updatePart(part)
+            }
+          },
+          (chunk) => {
+            output += chunk
+            if (part.state.status === "running") {
+              part.state.metadata = {
+                output: output,
+                description: "",
+              }
+              Session.updatePart(part)
+            }
+          },
+        )
+      }
+
+      abort.removeEventListener("abort", abortHandler)
+    }
 
     if (aborted) {
       output += "\n\n" + ["<metadata>", "User aborted the command", "</metadata>"].join("\n")

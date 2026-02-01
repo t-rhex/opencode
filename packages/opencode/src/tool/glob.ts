@@ -5,6 +5,7 @@ import DESCRIPTION from "./glob.txt"
 import { Ripgrep } from "../file/ripgrep"
 import { Instance } from "../project/instance"
 import { assertExternalDirectory } from "./external-directory"
+import { LocalFilesystem } from "@/fs"
 
 export const GlobTool = Tool.define("glob", {
   description: DESCRIPTION,
@@ -32,27 +33,43 @@ export const GlobTool = Tool.define("glob", {
     search = path.isAbsolute(search) ? search : path.resolve(Instance.directory, search)
     await assertExternalDirectory(ctx, search, { kind: "directory" })
 
+    const fs = Instance.fs
+    const isLocal = fs instanceof LocalFilesystem
     const limit = 100
-    const files = []
+    const files: { path: string; mtime: number }[] = []
     let truncated = false
-    for await (const file of Ripgrep.files({
-      cwd: search,
-      glob: [params.pattern],
-      signal: ctx.abort,
-    })) {
-      if (files.length >= limit) {
-        truncated = true
-        break
+
+    if (isLocal) {
+      for await (const file of Ripgrep.files({
+        cwd: search,
+        glob: [params.pattern],
+        signal: ctx.abort,
+      })) {
+        if (files.length >= limit) {
+          truncated = true
+          break
+        }
+        const full = path.resolve(search, file)
+        const stats = await fs
+          .stat(full)
+          .then((x) => x.mtime.getTime())
+          .catch(() => 0)
+        files.push({ path: full, mtime: stats })
       }
-      const full = path.resolve(search, file)
-      const stats = await Bun.file(full)
-        .stat()
-        .then((x) => x.mtime.getTime())
-        .catch(() => 0)
-      files.push({
-        path: full,
-        mtime: stats,
-      })
+    } else {
+      const matches = await fs.glob(params.pattern, search)
+      for (const file of matches) {
+        if (files.length >= limit) {
+          truncated = true
+          break
+        }
+        const full = path.isAbsolute(file) ? file : path.resolve(search, file)
+        const stats = await fs
+          .stat(full)
+          .then((x) => x.mtime.getTime())
+          .catch(() => 0)
+        files.push({ path: full, mtime: stats })
+      }
     }
     files.sort((a, b) => b.mtime - a.mtime)
 

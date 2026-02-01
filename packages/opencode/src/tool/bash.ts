@@ -8,7 +8,6 @@ import { Instance } from "../project/instance"
 import { lazy } from "@/util/lazy"
 import { Language } from "web-tree-sitter"
 
-import { $ } from "bun"
 import { Filesystem } from "@/util/filesystem"
 import { fileURLToPath } from "url"
 import { Flag } from "@/flag/flag.ts"
@@ -16,6 +15,7 @@ import { Shell } from "@/shell/shell"
 
 import { BashArity } from "@/permission/arity"
 import { Truncate } from "./truncation"
+import { LocalFilesystem, CurrentFilesystem } from "@/fs"
 
 const MAX_METADATA_LENGTH = 30_000
 const DEFAULT_TIMEOUT = Flag.OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 2 * 60 * 1000
@@ -111,22 +111,18 @@ export const BashTool = Tool.define("bash", async () => {
           command.push(child.text)
         }
 
-        // not an exhaustive list, but covers most common cases
         if (["cd", "rm", "cp", "mv", "mkdir", "touch", "chmod", "chown", "cat"].includes(command[0])) {
           for (const arg of command.slice(1)) {
             if (arg.startsWith("-") || (command[0] === "chmod" && arg.startsWith("+"))) continue
-            const resolved = await $`realpath ${arg}`
-              .cwd(cwd)
-              .quiet()
-              .nothrow()
-              .text()
-              .then((x) => x.trim())
+            const argPath = path.isAbsolute(arg) ? arg : path.join(cwd, arg)
+            const resolved = await Instance.fs.realpath(argPath).catch(() => argPath)
             log.info("resolved path", { arg, resolved })
             if (resolved) {
-              // Git Bash on Windows returns Unix-style paths like /c/Users/...
               const normalized =
                 process.platform === "win32" && resolved.match(/^\/[a-z]\//)
-                  ? resolved.replace(/^\/([a-z])\//, (_, drive) => `${drive.toUpperCase()}:\\`).replace(/\//g, "\\")
+                  ? resolved
+                      .replace(/^\/([a-z])\//, (_: string, drive: string) => `${drive.toUpperCase()}:\\`)
+                      .replace(/\//g, "\\")
                   : resolved
               if (!Instance.containsPath(normalized)) directories.add(normalized)
             }
@@ -150,27 +146,30 @@ export const BashTool = Tool.define("bash", async () => {
       }
 
       if (patterns.size > 0) {
+        log.info("asking bash permission", { patterns: Array.from(patterns) })
         await ctx.ask({
           permission: "bash",
           patterns: Array.from(patterns),
           always: Array.from(always),
           metadata: {},
         })
+        log.info("bash permission granted")
       }
 
-      const proc = spawn(params.command, {
-        shell,
+      const fs = Instance.fs
+      let output = ""
+      let aborted = false
+
+      const isLocal = fs instanceof LocalFilesystem
+      const isRemote = CurrentFilesystem.isRemote()
+      log.info("bash tool executing", {
+        command: params.command,
         cwd,
-        env: {
-          ...process.env,
-        },
-        stdio: ["ignore", "pipe", "pipe"],
-        detached: process.platform !== "win32",
+        isLocal,
+        isRemote,
+        fsType: fs.constructor.name,
       })
 
-      let output = ""
-
-      // Initialize metadata with empty output
       ctx.metadata({
         metadata: {
           output: "",
@@ -178,72 +177,104 @@ export const BashTool = Tool.define("bash", async () => {
         },
       })
 
-      const append = (chunk: Buffer) => {
-        output += chunk.toString()
+      const updateMetadata = () => {
         ctx.metadata({
           metadata: {
-            // truncate the metadata to avoid GIANT blobs of data (has nothing to do w/ what agent can access)
             output: output.length > MAX_METADATA_LENGTH ? output.slice(0, MAX_METADATA_LENGTH) + "\n\n..." : output,
             description: params.description,
           },
         })
       }
 
-      proc.stdout?.on("data", append)
-      proc.stderr?.on("data", append)
-
-      let timedOut = false
-      let aborted = false
-      let exited = false
-
-      const kill = () => Shell.killTree(proc, { exited: () => exited })
+      const abortHandler = () => {
+        aborted = true
+      }
+      ctx.abort.addEventListener("abort", abortHandler, { once: true })
 
       if (ctx.abort.aborted) {
         aborted = true
-        await kill()
       }
+      let exitCode = 0
+      let timedOut = false
 
-      const abortHandler = () => {
-        aborted = true
-        void kill()
-      }
+      if (isLocal) {
+        const proc = spawn(params.command, {
+          shell,
+          cwd,
+          env: { ...process.env },
+          stdio: ["ignore", "pipe", "pipe"],
+          detached: process.platform !== "win32",
+        })
 
-      ctx.abort.addEventListener("abort", abortHandler, { once: true })
+        let exited = false
+        const kill = () => Shell.killTree(proc, { exited: () => exited })
 
-      const timeoutTimer = setTimeout(() => {
-        timedOut = true
-        void kill()
-      }, timeout + 100)
+        if (aborted) await kill()
 
-      await new Promise<void>((resolve, reject) => {
-        const cleanup = () => {
-          clearTimeout(timeoutTimer)
-          ctx.abort.removeEventListener("abort", abortHandler)
+        const localAbortHandler = () => {
+          aborted = true
+          void kill()
         }
+        ctx.abort.addEventListener("abort", localAbortHandler, { once: true })
 
-        proc.once("exit", () => {
-          exited = true
-          cleanup()
-          resolve()
+        const timeoutTimer = setTimeout(() => {
+          timedOut = true
+          void kill()
+        }, timeout + 100)
+
+        proc.stdout?.on("data", (chunk: Buffer) => {
+          output += chunk.toString()
+          updateMetadata()
+        })
+        proc.stderr?.on("data", (chunk: Buffer) => {
+          output += chunk.toString()
+          updateMetadata()
         })
 
-        proc.once("error", (error) => {
-          exited = true
-          cleanup()
-          reject(error)
+        await new Promise<void>((resolve, reject) => {
+          proc.once("exit", () => {
+            exited = true
+            clearTimeout(timeoutTimer)
+            ctx.abort.removeEventListener("abort", localAbortHandler)
+            resolve()
+          })
+          proc.once("error", (err) => {
+            exited = true
+            clearTimeout(timeoutTimer)
+            ctx.abort.removeEventListener("abort", localAbortHandler)
+            reject(err)
+          })
         })
-      })
+
+        exitCode = proc.exitCode ?? 0
+      } else {
+        log.info("executing remote command", { command: params.command, cwd, timeout })
+        const result = await fs.execStream(
+          params.command,
+          { cwd, timeout },
+          (chunk) => {
+            output += chunk
+            updateMetadata()
+          },
+          (chunk) => {
+            output += chunk
+            updateMetadata()
+          },
+        )
+        log.info("remote command completed", { exitCode: result.exitCode })
+        exitCode = result.exitCode
+        timedOut = exitCode === 124
+      }
+
+      ctx.abort.removeEventListener("abort", abortHandler)
 
       const resultMetadata: string[] = []
-
       if (timedOut) {
         resultMetadata.push(`bash tool terminated command after exceeding timeout ${timeout} ms`)
       }
-
       if (aborted) {
         resultMetadata.push("User aborted the command")
       }
-
       if (resultMetadata.length > 0) {
         output += "\n\n<bash_metadata>\n" + resultMetadata.join("\n") + "\n</bash_metadata>"
       }
@@ -252,7 +283,7 @@ export const BashTool = Tool.define("bash", async () => {
         title: params.description,
         metadata: {
           output: output.length > MAX_METADATA_LENGTH ? output.slice(0, MAX_METADATA_LENGTH) + "\n\n..." : output,
-          exit: proc.exitCode,
+          exit: exitCode,
           description: params.description,
         },
         output,

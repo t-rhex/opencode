@@ -45,6 +45,51 @@ export const { use: useRemote, provider: RemoteProvider } = createSimpleContext(
 
       try {
         const result = await platform.remoteConnect(opts)
+        console.log("[RemoteContext] Got result:", result)
+
+        setStore("session", {
+          id: result.session.id,
+          target: result.session.target,
+          repo: result.session.repo,
+          ref: result.session.git_ref,
+          port: result.session.port,
+          localPort: result.session.local_port,
+          startedAt: result.session.started_at,
+        })
+        console.log("[RemoteContext] Session set, adding server URL:", result.url)
+        setStore("status", "connected")
+
+        if (result.password) {
+          window.__OPENCODE__ ??= {}
+          window.__OPENCODE__.serverPassword = result.password
+          window.__OPENCODE__.serverPasswords ??= new Map()
+          window.__OPENCODE__.serverPasswords.set(result.url, result.password)
+          console.log("[RemoteContext] Set remote server password for URL:", result.url)
+        }
+
+        server.add(result.url)
+        console.log("[RemoteContext] Server added, done!")
+      } catch (e) {
+        console.error("[RemoteContext] Error:", e)
+        setStore("error", e instanceof Error ? e.message : String(e))
+        setStore("status", "error")
+      }
+    }
+
+    async function connectDirectory(opts: { target: string; path: string; keyPath?: string }) {
+      if (!platform.remoteConnectDirectory) {
+        setStore("error", "Remote directory connections not supported on this platform")
+        setStore("status", "error")
+        return
+      }
+
+      setStore("status", "connecting")
+      setStore("error", null)
+      setStore("previousUrl", server.url)
+
+      try {
+        const result = await platform.remoteConnectDirectory(opts)
+        console.log("[RemoteContext] Got directory result:", result)
 
         setStore("session", {
           id: result.session.id,
@@ -57,8 +102,16 @@ export const { use: useRemote, provider: RemoteProvider } = createSimpleContext(
         })
         setStore("status", "connected")
 
+        if (result.password) {
+          window.__OPENCODE__ ??= {}
+          window.__OPENCODE__.serverPassword = result.password
+          window.__OPENCODE__.serverPasswords ??= new Map()
+          window.__OPENCODE__.serverPasswords.set(result.url, result.password)
+        }
+
         server.add(result.url)
       } catch (e) {
+        console.error("[RemoteContext] Directory error:", e)
         setStore("error", e instanceof Error ? e.message : String(e))
         setStore("status", "error")
       }
@@ -116,6 +169,7 @@ export const { use: useRemote, provider: RemoteProvider } = createSimpleContext(
         return canRemote()
       },
       connect,
+      connectDirectory,
       disconnect,
       listSessions,
       stopSession,

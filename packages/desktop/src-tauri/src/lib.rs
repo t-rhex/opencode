@@ -294,6 +294,9 @@ pub fn run() {
             set_default_server_url,
             markdown::parse_markdown_command,
             remote::remote_connect,
+            remote::remote_connect_directory,
+            remote::remote_browse_directory,
+            remote::remote_create_directory,
             remote::remote_disconnect,
             remote::remote_list_sessions,
             remote::remote_stop_session

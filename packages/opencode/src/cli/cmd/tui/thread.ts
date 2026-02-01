@@ -1,7 +1,7 @@
 import { cmd } from "@/cli/cmd/cmd"
 import { tui } from "./app"
 import { Rpc } from "@/util/rpc"
-import { type rpc } from "./worker"
+import { type rpc, type RemoteConfig } from "./worker"
 import path from "path"
 import { UI } from "@/cli/ui"
 import { iife } from "@/util/iife"
@@ -40,6 +40,19 @@ function createEventSource(client: RpcClient): EventSource {
   }
 }
 
+function parseRemoteTarget(target: string, identity?: string, remoteDir?: string): RemoteConfig {
+  const match = target.match(/^([^@]+)@([^:]+)(?::(\d+))?$/)
+  if (!match) throw new Error(`Invalid remote target format: ${target}. Expected: user@host or user@host:port`)
+  const [, username, host, portStr] = match
+  return {
+    host,
+    username,
+    port: portStr ? parseInt(portStr, 10) : 22,
+    privateKeyPath: identity,
+    remoteDir,
+  }
+}
+
 export const TuiThreadCommand = cmd({
   command: "$0 [project]",
   describe: "start opencode tui",
@@ -71,11 +84,23 @@ export const TuiThreadCommand = cmd({
       .option("agent", {
         type: "string",
         describe: "agent to use",
+      })
+      .option("remote", {
+        type: "string",
+        describe: "SSH target for remote development (e.g., user@host:port)",
+      })
+      .option("identity", {
+        type: "string",
+        alias: ["i"],
+        describe: "path to SSH private key for remote connection",
+      })
+      .option("remote-dir", {
+        type: "string",
+        describe: "working directory on remote server (defaults to home directory)",
       }),
   handler: async (args) => {
-    // Resolve relative paths against PWD to preserve behavior when using --cwd flag
     const baseCwd = process.env.PWD ?? process.cwd()
-    const cwd = args.project ? path.resolve(baseCwd, args.project) : process.cwd()
+    const localCwd = args.project ? path.resolve(baseCwd, args.project) : process.cwd()
     const localWorker = new URL("./worker.ts", import.meta.url)
     const distWorker = new URL("./cli/cmd/tui/worker.js", import.meta.url)
     const workerPath = await iife(async () => {
@@ -83,17 +108,28 @@ export const TuiThreadCommand = cmd({
       if (await Bun.file(distWorker).exists()) return distWorker
       return localWorker
     })
-    try {
-      process.chdir(cwd)
-    } catch (e) {
-      UI.error("Failed to change directory to " + cwd)
-      return
+
+    const isRemote = !!args.remote
+    const cwd = isRemote
+      ? (args["remote-dir"] ?? `/home/${parseRemoteTarget(args.remote!, args.identity, args["remote-dir"]).username}`)
+      : localCwd
+
+    if (!isRemote) {
+      try {
+        process.chdir(localCwd)
+      } catch (e) {
+        UI.error("Failed to change directory to " + localCwd)
+        return
+      }
     }
 
     const worker = new Worker(workerPath, {
-      env: Object.fromEntries(
-        Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
-      ),
+      env: {
+        ...Object.fromEntries(
+          Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+        ),
+        ...(isRemote ? { OPENCODE_DIRECTORY: cwd } : {}),
+      },
     })
     worker.onerror = (e) => {
       Log.Default.error(e)
@@ -108,6 +144,18 @@ export const TuiThreadCommand = cmd({
     process.on("SIGUSR2", async () => {
       await client.call("reload", undefined)
     })
+
+    if (args.remote) {
+      const remoteConfig = parseRemoteTarget(args.remote, args.identity, args["remote-dir"])
+      UI.println(`Connecting to remote: ${remoteConfig.username}@${remoteConfig.host}:${remoteConfig.port}...`)
+      try {
+        await client.call("initRemote", remoteConfig)
+        UI.println("Connected to remote server")
+      } catch (e) {
+        UI.error(`Failed to connect to remote: ${e instanceof Error ? e.message : e}`)
+        return
+      }
+    }
 
     const prompt = await iife(async () => {
       const piped = !process.stdin.isTTY ? await Bun.stdin.text() : undefined

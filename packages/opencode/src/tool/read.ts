@@ -1,5 +1,4 @@
 import z from "zod"
-import * as fs from "fs"
 import * as path from "path"
 import { Tool } from "./tool"
 import { LSP } from "../lsp"
@@ -10,9 +9,27 @@ import { Identifier } from "../id/id"
 import { assertExternalDirectory } from "./external-directory"
 import { InstructionPrompt } from "../session/instruction"
 
+import type { IFilesystem } from "@/fs"
+
 const DEFAULT_READ_LIMIT = 2000
 const MAX_LINE_LENGTH = 2000
 const MAX_BYTES = 50 * 1024
+
+const MIME_TYPES: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
+  ".bmp": "image/bmp",
+  ".pdf": "application/pdf",
+}
+
+function getMimeType(ext: string): string | undefined {
+  return MIME_TYPES[ext]
+}
 
 export const ReadTool = Tool.define("read", {
   description: DESCRIPTION,
@@ -39,18 +56,18 @@ export const ReadTool = Tool.define("read", {
       metadata: {},
     })
 
-    const file = Bun.file(filepath)
-    if (!(await file.exists())) {
+    const fs = Instance.fs
+    if (!(await fs.exists(filepath))) {
       const dir = path.dirname(filepath)
       const base = path.basename(filepath)
 
-      const dirEntries = fs.readdirSync(dir)
+      const dirEntries = await fs.readdir(dir).catch(() => [] as string[])
       const suggestions = dirEntries
         .filter(
-          (entry) =>
+          (entry: string) =>
             entry.toLowerCase().includes(base.toLowerCase()) || base.toLowerCase().includes(entry.toLowerCase()),
         )
-        .map((entry) => path.join(dir, entry))
+        .map((entry: string) => path.join(dir, entry))
         .slice(0, 3)
 
       if (suggestions.length > 0) {
@@ -62,13 +79,14 @@ export const ReadTool = Tool.define("read", {
 
     const instructions = await InstructionPrompt.resolve(ctx.messages, filepath, ctx.messageID)
 
-    // Exclude SVG (XML-based) and vnd.fastbidsheet (.fbs extension, commonly FlatBuffers schema files)
-    const isImage =
-      file.type.startsWith("image/") && file.type !== "image/svg+xml" && file.type !== "image/vnd.fastbidsheet"
-    const isPdf = file.type === "application/pdf"
+    const ext = path.extname(filepath).toLowerCase()
+    const mime = getMimeType(ext)
+    const isImage = mime?.startsWith("image/") && mime !== "image/svg+xml"
+    const isPdf = mime === "application/pdf"
+
     if (isImage || isPdf) {
-      const mime = file.type
       const msg = `${isImage ? "Image" : "PDF"} read successfully`
+      const bytes = await fs.readBytes(filepath)
       return {
         title,
         output: msg,
@@ -83,19 +101,20 @@ export const ReadTool = Tool.define("read", {
             sessionID: ctx.sessionID,
             messageID: ctx.messageID,
             type: "file",
-            mime,
-            url: `data:${mime};base64,${Buffer.from(await file.bytes()).toString("base64")}`,
+            mime: mime!,
+            url: `data:${mime};base64,${Buffer.from(bytes).toString("base64")}`,
           },
         ],
       }
     }
 
-    const isBinary = await isBinaryFile(filepath, file)
+    const isBinary = await isBinaryFile(filepath, fs)
     if (isBinary) throw new Error(`Cannot read binary file: ${filepath}`)
 
     const limit = params.limit ?? DEFAULT_READ_LIMIT
     const offset = params.offset || 0
-    const lines = await file.text().then((text) => text.split("\n"))
+    const text = await fs.read(filepath)
+    const lines = text.split("\n")
 
     const raw: string[] = []
     let bytes = 0
@@ -153,59 +172,54 @@ export const ReadTool = Tool.define("read", {
   },
 })
 
-async function isBinaryFile(filepath: string, file: Bun.BunFile): Promise<boolean> {
+const BINARY_EXTENSIONS = new Set([
+  ".zip",
+  ".tar",
+  ".gz",
+  ".exe",
+  ".dll",
+  ".so",
+  ".class",
+  ".jar",
+  ".war",
+  ".7z",
+  ".doc",
+  ".docx",
+  ".xls",
+  ".xlsx",
+  ".ppt",
+  ".pptx",
+  ".odt",
+  ".ods",
+  ".odp",
+  ".bin",
+  ".dat",
+  ".obj",
+  ".o",
+  ".a",
+  ".lib",
+  ".wasm",
+  ".pyc",
+  ".pyo",
+])
+
+async function isBinaryFile(filepath: string, fs: IFilesystem): Promise<boolean> {
   const ext = path.extname(filepath).toLowerCase()
-  // binary check for common non-text extensions
-  switch (ext) {
-    case ".zip":
-    case ".tar":
-    case ".gz":
-    case ".exe":
-    case ".dll":
-    case ".so":
-    case ".class":
-    case ".jar":
-    case ".war":
-    case ".7z":
-    case ".doc":
-    case ".docx":
-    case ".xls":
-    case ".xlsx":
-    case ".ppt":
-    case ".pptx":
-    case ".odt":
-    case ".ods":
-    case ".odp":
-    case ".bin":
-    case ".dat":
-    case ".obj":
-    case ".o":
-    case ".a":
-    case ".lib":
-    case ".wasm":
-    case ".pyc":
-    case ".pyo":
-      return true
-    default:
-      break
-  }
+  if (BINARY_EXTENSIONS.has(ext)) return true
 
-  const stat = await file.stat()
-  const fileSize = stat.size
-  if (fileSize === 0) return false
+  const stat = await fs.stat(filepath)
+  if (stat.size === 0) return false
 
-  const bufferSize = Math.min(4096, fileSize)
-  const buffer = await file.arrayBuffer()
-  if (buffer.byteLength === 0) return false
-  const bytes = new Uint8Array(buffer.slice(0, bufferSize))
+  const bytes = await fs.readBytes(filepath)
+  if (bytes.byteLength === 0) return false
 
+  const sampleSize = Math.min(4096, bytes.byteLength)
   let nonPrintableCount = 0
-  for (let i = 0; i < bytes.length; i++) {
+  for (let i = 0; i < sampleSize; i++) {
     if (bytes[i] === 0) return true
     if (bytes[i] < 9 || (bytes[i] > 13 && bytes[i] < 32)) {
       nonPrintableCount++
     }
   }
-  // If >30% non-printable characters, consider it binary
-  return nonPrintableCount / bytes.length > 0.3
+  return nonPrintableCount / sampleSize > 0.3
 }

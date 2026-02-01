@@ -10745,9 +10745,12 @@
           },
           "directory": {
             "type": "string"
+          },
+          "remote": {
+            "type": "boolean"
           }
         },
-        "required": ["home", "state", "config", "worktree", "directory"]
+        "required": ["home", "state", "config", "worktree", "directory", "remote"]
       },
       "VcsInfo": {
         "type": "object",

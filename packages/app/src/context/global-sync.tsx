@@ -148,6 +148,7 @@ function createGlobalSync() {
     const cached = sdkCache.get(directory)
     if (cached) return cached
 
+    console.log(`[GlobalSync] Creating SDK for directory: ${directory}, baseUrl: ${globalSDK.url}`)
     const sdk = createOpencodeClient({
       baseUrl: globalSDK.url,
       fetch: platform.fetch,
@@ -531,7 +532,10 @@ function createGlobalSync() {
       if (store.status !== "complete") setStore("status", "partial")
 
       Promise.all([
-        sdk.path.get().then((x) => setStore("path", x.data!)),
+        sdk.path.get().then((x) => {
+          console.log(`[GlobalSync] path.get for ${directory}:`, x.data)
+          setStore("path", x.data!)
+        }),
         sdk.command.list().then((x) => setStore("command", x.data ?? [])),
         sdk.app.skills().then((x) => setStore("skill", x.data ?? [])),
         sdk.session.status().then((x) => setStore("session_status", x.data!)),
@@ -539,6 +543,7 @@ function createGlobalSync() {
         sdk.mcp.status().then((x) => setStore("mcp", x.data!)),
         sdk.lsp.status().then((x) => setStore("lsp", x.data!)),
         sdk.vcs.get().then((x) => {
+          console.log(`[GlobalSync] vcs.get for ${directory}:`, x.data)
           const next = x.data ?? store.vcs
           setStore("vcs", next)
           if (next?.branch) cache.setStore("value", next)

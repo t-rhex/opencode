@@ -1654,6 +1654,7 @@ function Bash(props: ToolProps<typeof BashTool>) {
 
 function Write(props: ToolProps<typeof WriteTool>) {
   const { theme, syntax } = useTheme()
+  const normalize = useNormalizePath()
   const code = createMemo(() => {
     if (!props.input.content) return ""
     return props.input.content
@@ -1667,7 +1668,7 @@ function Write(props: ToolProps<typeof WriteTool>) {
   return (
     <Switch>
       <Match when={props.metadata.diagnostics !== undefined}>
-        <BlockTool title={"# Wrote " + normalizePath(props.input.filePath!)} part={props.part}>
+        <BlockTool title={"# Wrote " + normalize(props.input.filePath!)} part={props.part}>
           <line_number fg={theme.textMuted} minWidth={3} paddingRight={1}>
             <code
               conceal={false}
@@ -1690,7 +1691,7 @@ function Write(props: ToolProps<typeof WriteTool>) {
       </Match>
       <Match when={true}>
         <InlineTool icon="←" pending="Preparing write..." complete={props.input.filePath} part={props.part}>
-          Write {normalizePath(props.input.filePath!)}
+          Write {normalize(props.input.filePath!)}
         </InlineTool>
       </Match>
     </Switch>
@@ -1698,9 +1699,10 @@ function Write(props: ToolProps<typeof WriteTool>) {
 }
 
 function Glob(props: ToolProps<typeof GlobTool>) {
+  const normalize = useNormalizePath()
   return (
     <InlineTool icon="✱" pending="Finding files..." complete={props.input.pattern} part={props.part}>
-      Glob "{props.input.pattern}" <Show when={props.input.path}>in {normalizePath(props.input.path)} </Show>
+      Glob "{props.input.pattern}" <Show when={props.input.path}>in {normalize(props.input.path)} </Show>
       <Show when={props.metadata.count}>({props.metadata.count} matches)</Show>
     </InlineTool>
   )
@@ -1708,6 +1710,7 @@ function Glob(props: ToolProps<typeof GlobTool>) {
 
 function Read(props: ToolProps<typeof ReadTool>) {
   const { theme } = useTheme()
+  const normalize = useNormalizePath()
   const loaded = createMemo(() => {
     if (props.part.state.status !== "completed") return []
     if (props.part.state.time.compacted) return []
@@ -1718,13 +1721,13 @@ function Read(props: ToolProps<typeof ReadTool>) {
   return (
     <>
       <InlineTool icon="→" pending="Reading file..." complete={props.input.filePath} part={props.part}>
-        Read {normalizePath(props.input.filePath!)} {input(props.input, ["filePath"])}
+        Read {normalize(props.input.filePath!)} {input(props.input, ["filePath"])}
       </InlineTool>
       <For each={loaded()}>
         {(filepath) => (
           <box paddingLeft={3}>
             <text paddingLeft={3} fg={theme.textMuted}>
-              ↳ Loaded {normalizePath(filepath)}
+              ↳ Loaded {normalize(filepath)}
             </text>
           </box>
         )}
@@ -1734,18 +1737,20 @@ function Read(props: ToolProps<typeof ReadTool>) {
 }
 
 function Grep(props: ToolProps<typeof GrepTool>) {
+  const normalize = useNormalizePath()
   return (
     <InlineTool icon="✱" pending="Searching content..." complete={props.input.pattern} part={props.part}>
-      Grep "{props.input.pattern}" <Show when={props.input.path}>in {normalizePath(props.input.path)} </Show>
+      Grep "{props.input.pattern}" <Show when={props.input.path}>in {normalize(props.input.path)} </Show>
       <Show when={props.metadata.matches}>({props.metadata.matches} matches)</Show>
     </InlineTool>
   )
 }
 
 function List(props: ToolProps<typeof ListTool>) {
+  const normalize = useNormalizePath()
   const dir = createMemo(() => {
     if (props.input.path) {
-      return normalizePath(props.input.path)
+      return normalize(props.input.path)
     }
     return ""
   })
@@ -1859,10 +1864,12 @@ function Edit(props: ToolProps<typeof EditTool>) {
     return arr.filter((x) => x.severity === 1).slice(0, 3)
   })
 
+  const normalize = useNormalizePath()
+
   return (
     <Switch>
       <Match when={props.metadata.diff !== undefined}>
-        <BlockTool title={"← Edit " + normalizePath(props.input.filePath!)} part={props.part}>
+        <BlockTool title={"← Edit " + normalize(props.input.filePath!)} part={props.part}>
           <box paddingLeft={1}>
             <diff
               diff={diffContent()}
@@ -1900,7 +1907,7 @@ function Edit(props: ToolProps<typeof EditTool>) {
       </Match>
       <Match when={true}>
         <InlineTool icon="←" pending="Preparing edit..." complete={props.input.filePath} part={props.part}>
-          Edit {normalizePath(props.input.filePath!)} {input({ replaceAll: props.input.replaceAll })}
+          Edit {normalize(props.input.filePath!)} {input({ replaceAll: props.input.replaceAll })}
         </InlineTool>
       </Match>
     </Switch>
@@ -1910,6 +1917,7 @@ function Edit(props: ToolProps<typeof EditTool>) {
 function ApplyPatch(props: ToolProps<typeof ApplyPatchTool>) {
   const ctx = use()
   const { theme, syntax } = useTheme()
+  const normalize = useNormalizePath()
 
   const files = createMemo(() => props.metadata.files ?? [])
 
@@ -1948,7 +1956,7 @@ function ApplyPatch(props: ToolProps<typeof ApplyPatchTool>) {
   function title(file: { type: string; relativePath: string; filePath: string; deletions: number }) {
     if (file.type === "delete") return "# Deleted " + file.relativePath
     if (file.type === "add") return "# Created " + file.relativePath
-    if (file.type === "move") return "# Moved " + normalizePath(file.filePath) + " → " + file.relativePath
+    if (file.type === "move") return "# Moved " + normalize(file.filePath) + " → " + file.relativePath
     return "← Patched " + file.relativePath
   }
 
@@ -2036,12 +2044,19 @@ function Question(props: ToolProps<typeof QuestionTool>) {
   )
 }
 
-function normalizePath(input?: string) {
+function normalizePath(input?: string, basePath?: string) {
   if (!input) return ""
   if (path.isAbsolute(input)) {
-    return path.relative(process.cwd(), input) || "."
+    const base = basePath || process.cwd()
+    return path.relative(base, input) || "."
   }
   return input
+}
+
+function useNormalizePath() {
+  const ctx = useContext(context)
+  const worktree = ctx?.sync.data.path.worktree || ctx?.sync.data.path.directory
+  return (input?: string) => normalizePath(input, worktree)
 }
 
 function input(input: Record<string, any>, omit?: string[]): string {

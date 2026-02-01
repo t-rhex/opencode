@@ -30,6 +30,17 @@ const ContextInfo = (props: { context: Accessor<string | undefined>; cost: Acces
   )
 }
 
+const ModeInfo = () => {
+  const sync = useSync()
+  const { theme } = useTheme()
+  const label = createMemo(() => {
+    if (sync.data.path.remote) return "remote"
+    if (sync.data.vcs?.branch) return sync.data.vcs.branch
+    return `v${Installation.VERSION}`
+  })
+  return <text fg={theme.textMuted}>{label()}</text>
+}
+
 export function Header() {
   const route = useRouteData("session")
   const sync = useSync()
@@ -89,7 +100,7 @@ export function Header() {
                 </text>
                 <box flexDirection="row" gap={1} flexShrink={0}>
                   <ContextInfo context={context} cost={cost} />
-                  <text fg={theme.textMuted}>v{Installation.VERSION}</text>
+                  <ModeInfo />
                 </box>
               </box>
               <box flexDirection="row" gap={2}>
@@ -131,7 +142,7 @@ export function Header() {
               <Title session={session} />
               <box flexDirection="row" gap={1} flexShrink={0}>
                 <ContextInfo context={context} cost={cost} />
-                <text fg={theme.textMuted}>v{Installation.VERSION}</text>
+                <ModeInfo />
               </box>
             </box>
           </Match>

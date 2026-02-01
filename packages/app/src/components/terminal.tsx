@@ -147,8 +147,7 @@ export const Terminal = (props: TerminalProps) => {
 
       const url = new URL(sdk.url + `/pty/${local.pty.id}/connect?directory=${encodeURIComponent(sdk.directory)}`)
       if (window.__OPENCODE__?.serverPassword) {
-        url.username = "opencode"
-        url.password = window.__OPENCODE__?.serverPassword
+        url.searchParams.set("auth", window.__OPENCODE__.serverPassword)
       }
       const socket = new WebSocket(url)
       cleanups.push(() => {
