@@ -21,7 +21,7 @@ export const RemoteCommand = cmd({
       .command(RemoteDownloadCommand)
       .demandCommand()
       .epilog(
-        `Connection profiles can be configured in ~/.config/opencode/config.json:
+        `Connection profiles can be configured in ~/.config/opencode-remote/config.json:
 
   {
     "remote": {

@@ -38,11 +38,11 @@ export namespace Config {
   function getManagedConfigDir(): string {
     switch (process.platform) {
       case "darwin":
-        return "/Library/Application Support/opencode"
+        return "/Library/Application Support/opencode-remote"
       case "win32":
-        return path.join(process.env.ProgramData || "C:\\ProgramData", "opencode")
+        return path.join(process.env.ProgramData || "C:\\ProgramData", "opencode-remote")
       default:
-        return "/etc/opencode"
+        return "/etc/opencode-remote"
     }
   }
 
@@ -65,10 +65,10 @@ export namespace Config {
 
     // Config loading order (low -> high precedence): https://opencode.ai/docs/config#precedence-order
     // 1) Remote .well-known/opencode (org defaults)
-    // 2) Global config (~/.config/opencode/opencode.json{,c})
+    // 2) Global config (~/.config/opencode-remote/opencode-remote.json{,c})
     // 3) Custom config (OPENCODE_CONFIG)
-    // 4) Project config (opencode.json{,c})
-    // 5) .opencode directories (.opencode/agents/, .opencode/commands/, .opencode/plugins/, .opencode/opencode.json{,c})
+    // 4) Project config (opencode-remote.json{,c})
+    // 5) .opencode-remote directories (.opencode-remote/agents/, .opencode-remote/commands/, .opencode-remote/plugins/, .opencode-remote/opencode-remote.json{,c})
     // 6) Inline config (OPENCODE_CONFIG_CONTENT)
     // Managed config directory is enterprise-only and always overrides everything above.
     let result: Info = {}
@@ -103,7 +103,7 @@ export namespace Config {
 
     // Project config overrides global and remote config.
     if (!Flag.OPENCODE_DISABLE_PROJECT_CONFIG) {
-      for (const file of ["opencode.jsonc", "opencode.json"]) {
+      for (const file of ["opencode-remote.jsonc", "opencode-remote.json"]) {
         const found = await Filesystem.findUp(file, Instance.directory, Instance.worktree)
         for (const resolved of found.toReversed()) {
           result = mergeConfigConcatArrays(result, await loadFile(resolved))
@@ -117,35 +117,35 @@ export namespace Config {
 
     const directories = [
       Global.Path.config,
-      // Scan project .opencode/ directories when project discovery is enabled
+      // Scan project .opencode-remote/ directories when project discovery is enabled
       ...(!Flag.OPENCODE_DISABLE_PROJECT_CONFIG
         ? await Array.fromAsync(
             Filesystem.up({
-              targets: [".opencode"],
+              targets: [".opencode-remote"],
               start: Instance.directory,
               stop: Instance.worktree,
             }),
           )
         : []),
-      // Always scan ~/.opencode/ (user home directory)
+      // Always scan ~/.opencode-remote/ (user home directory)
       ...(await Array.fromAsync(
         Filesystem.up({
-          targets: [".opencode"],
+          targets: [".opencode-remote"],
           start: Global.Path.home,
           stop: Global.Path.home,
         }),
       )),
     ]
 
-    // .opencode directory config overrides (project and global) config sources.
+    // .opencode-remote directory config overrides (project and global) config sources.
     if (Flag.OPENCODE_CONFIG_DIR) {
       directories.push(Flag.OPENCODE_CONFIG_DIR)
       log.debug("loading config from OPENCODE_CONFIG_DIR", { path: Flag.OPENCODE_CONFIG_DIR })
     }
 
     for (const dir of unique(directories)) {
-      if (dir.endsWith(".opencode") || dir === Flag.OPENCODE_CONFIG_DIR) {
-        for (const file of ["opencode.jsonc", "opencode.json"]) {
+      if (dir.endsWith(".opencode-remote") || dir === Flag.OPENCODE_CONFIG_DIR) {
+        for (const file of ["opencode-remote.jsonc", "opencode-remote.json"]) {
           log.debug(`loading config from ${path.join(dir, file)}`)
           result = mergeConfigConcatArrays(result, await loadFile(path.join(dir, file)))
           // to satisfy the type checker
@@ -176,7 +176,7 @@ export namespace Config {
     // which would fail on system directories requiring elevated permissions
     // This way it only loads config file and not skills/plugins/commands
     if (existsSync(managedConfigDir)) {
-      for (const file of ["opencode.jsonc", "opencode.json"]) {
+      for (const file of ["opencode-remote.jsonc", "opencode-remote.json"]) {
         result = mergeConfigConcatArrays(result, await loadFile(path.join(managedConfigDir, file)))
       }
     }
@@ -290,7 +290,7 @@ export namespace Config {
       })
       if (!md) continue
 
-      const patterns = ["/.opencode/command/", "/.opencode/commands/", "/command/", "/commands/"]
+      const patterns = ["/.opencode-remote/command/", "/.opencode-remote/commands/", "/command/", "/commands/"]
       const file = rel(item, patterns) ?? path.basename(item)
       const name = trim(file)
 
@@ -330,7 +330,7 @@ export namespace Config {
       })
       if (!md) continue
 
-      const patterns = ["/.opencode/agent/", "/.opencode/agents/", "/agent/", "/agents/"]
+      const patterns = ["/.opencode-remote/agent/", "/.opencode-remote/agents/", "/agent/", "/agents/"]
       const file = rel(item, patterns) ?? path.basename(item)
       const agentName = trim(file)
 
@@ -426,9 +426,9 @@ export namespace Config {
    * Deduplicates plugins by name, with later entries (higher priority) winning.
    * Priority order (highest to lowest):
    * 1. Local plugin/ directory
-   * 2. Local opencode.json
+   * 2. Local opencode-remote.json
    * 3. Global plugin/ directory
-   * 4. Global opencode.json
+   * 4. Global opencode-remote.json
    *
    * Since plugins are added in low-to-high priority order,
    * we reverse, deduplicate (keeping first occurrence), then restore order.
@@ -1154,8 +1154,8 @@ export namespace Config {
     let result: Info = pipe(
       {},
       mergeDeep(await loadFile(path.join(Global.Path.config, "config.json"))),
-      mergeDeep(await loadFile(path.join(Global.Path.config, "opencode.json"))),
-      mergeDeep(await loadFile(path.join(Global.Path.config, "opencode.jsonc"))),
+      mergeDeep(await loadFile(path.join(Global.Path.config, "opencode-remote.json"))),
+      mergeDeep(await loadFile(path.join(Global.Path.config, "opencode-remote.jsonc"))),
     )
 
     const legacy = path.join(Global.Path.config, "config")

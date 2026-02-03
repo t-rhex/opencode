@@ -31,7 +31,7 @@ export namespace RemoteSession {
 
   // Remote paths
   export function binPath(): string {
-    return `${BASE_DIR}/bin/opencode`
+    return `${BASE_DIR}/bin/opencode-remote`
   }
 
   export function workspacePath(id: string): string {

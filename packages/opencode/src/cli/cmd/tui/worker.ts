@@ -79,7 +79,7 @@ const startEventStream = (directory: string) => {
   }) as typeof globalThis.fetch
 
   const sdk = createOpencodeClient({
-    baseUrl: "http://opencode.internal",
+    baseUrl: "http://opencode-remote.internal",
     directory,
     fetch: fetchFn,
     signal,

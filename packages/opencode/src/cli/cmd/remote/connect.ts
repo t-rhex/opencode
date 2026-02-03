@@ -204,7 +204,7 @@ export const RemoteConnectCommand = cmd({
       cleanup()
       prompts.intro("Session ended")
       prompts.log.info(`Remote session ${sessionId} is still running`)
-      prompts.log.info(`To stop: opencode remote stop ${args.target} --id ${sessionId}`)
+      prompts.log.info(`To stop: opencode-remote remote stop ${args.target} --id ${sessionId}`)
       prompts.outro("Done")
     })
   },

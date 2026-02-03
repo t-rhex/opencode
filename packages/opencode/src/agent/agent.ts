@@ -100,7 +100,7 @@ export namespace Agent {
             },
             edit: {
               "*": "deny",
-              [path.join(".opencode", "plans", "*.md")]: "allow",
+              [path.join(".opencode-remote", "plans", "*.md")]: "allow",
               [path.relative(Instance.worktree, path.join(Global.Path.data, path.join("plans", "*.md")))]: "allow",
             },
           }),

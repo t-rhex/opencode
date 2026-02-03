@@ -65,7 +65,7 @@ export const RemoteInstallCommand = cmd({
       // Run install, then copy to our location
       await SSH.exec(sshOpts, `curl -fsSL https://opencode.ai/install | bash`)
       // Copy to our remote bin directory
-      await SSH.exec(sshOpts, `cp ~/.opencode/bin/opencode ~/.opencode-remote/bin/opencode`)
+      await SSH.exec(sshOpts, `cp ~/.opencode/bin/opencode ~/.opencode-remote/bin/opencode-remote`)
       await SSH.exec(sshOpts, `chmod 755 ~/.opencode-remote/bin/opencode`)
       spinner.stop("Installation complete")
     } catch (err) {

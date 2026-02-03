@@ -343,7 +343,7 @@ export const RunCommand = cmd({
         const request = new Request(input, init)
         return Server.App().fetch(request)
       }) as typeof globalThis.fetch
-      const sdk = createOpencodeClient({ baseUrl: "http://opencode.internal", fetch: fetchFn })
+      const sdk = createOpencodeClient({ baseUrl: "http://opencode-remote.internal", fetch: fetchFn })
 
       if (args.command) {
         const exists = await Command.get(args.command)
