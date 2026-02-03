@@ -10,7 +10,7 @@ import { GlobalBus } from "@/bus/global"
 import { createOpencodeClient, type Event } from "@opencode-ai/sdk/v2"
 import type { BunWebSocketData } from "hono/bun"
 import { Flag } from "@/flag/flag"
-import { CurrentFilesystem, RemoteFilesystem, RemoteEvent } from "@/fs"
+import { CurrentFilesystem, RemoteFilesystem, RemoteEvent, LocalFilesystem } from "@/fs"
 import { Bus } from "@/bus"
 
 export interface RemoteConfig {
@@ -209,6 +209,17 @@ export const rpc = {
 
     Log.Default.info("remote filesystem connected", { host: config.host, port: config.port })
     return { connected: true }
+  },
+  async disconnectRemote() {
+    const fs = CurrentFilesystem.get()
+    if (fs.disconnect) await fs.disconnect()
+    CurrentFilesystem.set(new LocalFilesystem())
+    CurrentFilesystem.setRemoteMode(false)
+    Instance.clearCache()
+    remoteConfig = undefined
+    startEventStream(process.cwd())
+    Log.Default.info("remote filesystem disconnected")
+    return { disconnected: true }
   },
   async checkUpgrade(input: { directory: string }) {
     await Instance.provide({
