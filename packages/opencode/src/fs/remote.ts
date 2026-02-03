@@ -310,6 +310,13 @@ export class RemoteFilesystem implements IFilesystem {
     return this.client !== null
   }
 
+  /**
+   * Get the underlying ssh2 Client for direct channel operations (e.g., MCP transport)
+   */
+  getSSHClient(): Client | null {
+    return this.client
+  }
+
   private async ensureConnected(): Promise<Client> {
     if (this.state.status === "reconnecting" && this.reconnecting) {
       await this.reconnecting

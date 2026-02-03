@@ -23,6 +23,8 @@ import { BusEvent } from "../bus/bus-event"
 import { Bus } from "@/bus"
 import { TuiEvent } from "@/cli/cmd/tui/event"
 import open from "open"
+import { CurrentFilesystem } from "../fs/current"
+import { SshStdioTransport } from "./ssh-transport"
 
 export namespace MCP {
   const log = Log.create({ service: "mcp" })
@@ -302,6 +304,17 @@ export namespace MCP {
     let status: Status | undefined = undefined
 
     if (mcp.type === "remote") {
+      // Warn if trying to connect to localhost URL in remote mode
+      if (CurrentFilesystem.isRemote()) {
+        const url = new URL(mcp.url)
+        if (url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "::1") {
+          log.warn("remote MCP server URL points to localhost - use --forward-port or SSH tunneling", {
+            key,
+            url: mcp.url,
+          })
+        }
+      }
+
       // OAuth is enabled by default for remote servers unless explicitly disabled with oauth: false
       const oauthDisabled = mcp.oauth === false
       const oauthConfig = typeof mcp.oauth === "object" ? mcp.oauth : undefined
@@ -408,43 +421,84 @@ export namespace MCP {
     if (mcp.type === "local") {
       const [cmd, ...args] = mcp.command
       const cwd = Instance.directory
-      const transport = new StdioClientTransport({
-        stderr: "pipe",
-        command: cmd,
-        args,
-        cwd,
-        env: {
-          ...process.env,
-          ...(cmd === "opencode" ? { BUN_BE_BUN: "1" } : {}),
-          ...mcp.environment,
-        },
-      })
-      transport.stderr?.on("data", (chunk: Buffer) => {
-        log.info(`mcp stderr: ${chunk.toString()}`, { key })
-      })
-
       const connectTimeout = mcp.timeout ?? DEFAULT_TIMEOUT
-      try {
-        const client = new Client({
-          name: "opencode",
-          version: Installation.VERSION,
-        })
-        await withTimeout(client.connect(transport), connectTimeout)
-        registerNotificationHandlers(client, key)
-        mcpClient = client
-        status = {
-          status: "connected",
+
+      if (CurrentFilesystem.isRemote()) {
+        // Remote mode: spawn MCP server on the remote host via SSH
+        const fs = CurrentFilesystem.get()
+        // Access the underlying ssh2 Client from RemoteFilesystem
+        // RemoteFilesystem exposes getSSHClient() for this purpose
+        const sshClient = (
+          fs as ReturnType<typeof CurrentFilesystem.get> & { getSSHClient?: () => unknown }
+        ).getSSHClient?.()
+        if (!sshClient) {
+          log.error("remote MCP requires SSH connection", { key })
+          status = { status: "failed" as const, error: "No SSH connection available for remote MCP" }
+        } else {
+          const transport = new SshStdioTransport(sshClient as import("ssh2").Client, mcp.command, cwd, mcp.environment)
+          transport.stderr?.on("data", (chunk: Buffer) => {
+            log.info(`mcp stderr: ${chunk.toString()}`, { key })
+          })
+          try {
+            const client = new Client({
+              name: "opencode",
+              version: Installation.VERSION,
+            })
+            await withTimeout(client.connect(transport), connectTimeout)
+            registerNotificationHandlers(client, key)
+            mcpClient = client
+            status = { status: "connected" }
+            log.info("remote mcp connected", { key, command: mcp.command })
+          } catch (error) {
+            log.error("remote mcp startup failed", {
+              key,
+              command: mcp.command,
+              cwd,
+              error: error instanceof Error ? error.message : String(error),
+            })
+            status = {
+              status: "failed" as const,
+              error: error instanceof Error ? error.message : String(error),
+            }
+          }
         }
-      } catch (error) {
-        log.error("local mcp startup failed", {
-          key,
-          command: mcp.command,
+      } else {
+        // Local mode: spawn MCP server as a child process
+        const transport = new StdioClientTransport({
+          stderr: "pipe",
+          command: cmd,
+          args,
           cwd,
-          error: error instanceof Error ? error.message : String(error),
+          env: {
+            ...process.env,
+            ...(cmd === "opencode" ? { BUN_BE_BUN: "1" } : {}),
+            ...mcp.environment,
+          },
         })
-        status = {
-          status: "failed" as const,
-          error: error instanceof Error ? error.message : String(error),
+        transport.stderr?.on("data", (chunk: Buffer) => {
+          log.info(`mcp stderr: ${chunk.toString()}`, { key })
+        })
+
+        try {
+          const client = new Client({
+            name: "opencode",
+            version: Installation.VERSION,
+          })
+          await withTimeout(client.connect(transport), connectTimeout)
+          registerNotificationHandlers(client, key)
+          mcpClient = client
+          status = { status: "connected" }
+        } catch (error) {
+          log.error("local mcp startup failed", {
+            key,
+            command: mcp.command,
+            cwd,
+            error: error instanceof Error ? error.message : String(error),
+          })
+          status = {
+            status: "failed" as const,
+            error: error instanceof Error ? error.message : String(error),
+          }
         }
       }
     }
