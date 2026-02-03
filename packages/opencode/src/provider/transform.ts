@@ -21,6 +21,7 @@ export namespace ProviderTransform {
     switch (npm) {
       case "@ai-sdk/github-copilot":
         return "copilot"
+      /* NOTE: Non-Copilot provider commented out
       case "@ai-sdk/openai":
       case "@ai-sdk/azure":
         return "openai"
@@ -36,6 +37,7 @@ export namespace ProviderTransform {
         return "gateway"
       case "@openrouter/ai-sdk-provider":
         return "openrouter"
+      */
     }
     return undefined
   }
@@ -172,6 +174,7 @@ export namespace ProviderTransform {
     const final = msgs.filter((msg) => msg.role !== "system").slice(-2)
 
     const providerOptions = {
+      /* NOTE: Non-Copilot provider commented out
       anthropic: {
         cacheControl: { type: "ephemeral" },
       },
@@ -184,6 +187,7 @@ export namespace ProviderTransform {
       openaiCompatible: {
         cache_control: { type: "ephemeral" },
       },
+      */
       copilot: {
         copilot_cache_control: { type: "ephemeral" },
       },
@@ -353,6 +357,7 @@ export namespace ProviderTransform {
     if (id.includes("grok")) return {}
 
     switch (model.api.npm) {
+      /* NOTE: Non-Copilot provider commented out
       case "@openrouter/ai-sdk-provider":
         if (!model.id.includes("gpt") && !model.id.includes("gemini-3")) return {}
         return Object.fromEntries(OPENAI_EFFORTS.map((effort) => [effort, { reasoning: { effort } }]))
@@ -360,6 +365,7 @@ export namespace ProviderTransform {
       // TODO: YOU CANNOT SET max_tokens if this is set!!!
       case "@ai-sdk/gateway":
         return Object.fromEntries(OPENAI_EFFORTS.map((effort) => [effort, { reasoningEffort: effort }]))
+      */
 
       case "@ai-sdk/github-copilot":
         if (model.id.includes("gemini")) {
@@ -386,6 +392,7 @@ export namespace ProviderTransform {
           ]),
         )
 
+      /* NOTE: Non-Copilot provider commented out
       case "@ai-sdk/cerebras":
       // https://v5.ai-sdk.dev/providers/ai-sdk-providers/cerebras
       case "@ai-sdk/togetherai":
@@ -571,6 +578,7 @@ export namespace ProviderTransform {
           }
         }
         return Object.fromEntries(WIDELY_SUPPORTED_EFFORTS.map((effort) => [effort, { reasoningEffort: effort }]))
+      */
     }
     return {}
   }
@@ -582,11 +590,16 @@ export namespace ProviderTransform {
   }): Record<string, any> {
     const result: Record<string, any> = {}
 
+    // copilot should set store to false by default.
+    if (input.model.api.npm === "@ai-sdk/github-copilot") {
+      result["store"] = false
+    }
+
+    /* NOTE: Non-Copilot provider commented out
     // openai and providers using openai package should set store to false by default.
     if (
       input.model.providerID === "openai" ||
-      input.model.api.npm === "@ai-sdk/openai" ||
-      input.model.api.npm === "@ai-sdk/github-copilot"
+      input.model.api.npm === "@ai-sdk/openai"
     ) {
       result["store"] = false
     }
@@ -653,15 +666,25 @@ export namespace ProviderTransform {
     if (input.model.providerID === "venice") {
       result["promptCacheKey"] = input.sessionID
     }
+    */
 
     return result
   }
 
   export function smallOptions(model: Provider.Model) {
+    if (model.api.npm === "@ai-sdk/github-copilot") {
+      if (model.api.id.includes("gpt-5")) {
+        if (model.api.id.includes("5.")) {
+          return { store: false, reasoningEffort: "low" }
+        }
+        return { store: false, reasoningEffort: "minimal" }
+      }
+      return { store: false }
+    }
+    /* NOTE: Non-Copilot provider commented out
     if (
       model.providerID === "openai" ||
-      model.api.npm === "@ai-sdk/openai" ||
-      model.api.npm === "@ai-sdk/github-copilot"
+      model.api.npm === "@ai-sdk/openai"
     ) {
       if (model.api.id.includes("gpt-5")) {
         if (model.api.id.includes("5.")) {
@@ -684,6 +707,7 @@ export namespace ProviderTransform {
       }
       return { reasoningEffort: "minimal" }
     }
+    */
     return {}
   }
 

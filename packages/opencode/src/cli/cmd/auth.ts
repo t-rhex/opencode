@@ -269,13 +269,13 @@ export const AuthLoginCommand = cmd({
         })
 
         const priority: Record<string, number> = {
-          opencode: 0,
-          anthropic: 1,
-          "github-copilot": 2,
-          openai: 3,
-          google: 4,
-          openrouter: 5,
-          vercel: 6,
+          "github-copilot": 0,
+          // opencode: 0,
+          // anthropic: 1,
+          // openai: 3,
+          // google: 4,
+          // openrouter: 5,
+          // vercel: 6,
         }
         let provider = await prompts.autocomplete({
           message: "Select provider",
@@ -292,9 +292,9 @@ export const AuthLoginCommand = cmd({
                 label: x.name,
                 value: x.id,
                 hint: {
-                  opencode: "recommended",
-                  anthropic: "Claude Max or API key",
-                  openai: "ChatGPT Plus/Pro or API key",
+                  // opencode: "recommended",
+                  // anthropic: "Claude Max or API key",
+                  // openai: "ChatGPT Plus/Pro or API key",
                 }[x.id],
               })),
             ),
@@ -334,6 +334,7 @@ export const AuthLoginCommand = cmd({
           )
         }
 
+        /*
         if (provider === "amazon-bedrock") {
           prompts.log.info(
             "Amazon Bedrock authentication priority:\n" +
@@ -357,6 +358,7 @@ export const AuthLoginCommand = cmd({
             "Cloudflare AI Gateway can be configured with CLOUDFLARE_GATEWAY_ID, CLOUDFLARE_ACCOUNT_ID, and CLOUDFLARE_API_TOKEN environment variables. Read more: https://opencode.ai/docs/providers/#cloudflare-ai-gateway",
           )
         }
+        */
 
         const key = await prompts.password({
           message: "Enter your API key",

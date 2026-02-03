@@ -15,11 +15,11 @@ import { Clipboard } from "@tui/util/clipboard"
 import { useToast } from "../ui/toast"
 
 const PROVIDER_PRIORITY: Record<string, number> = {
-  opencode: 0,
-  anthropic: 1,
-  "github-copilot": 2,
-  openai: 3,
-  google: 4,
+  "github-copilot": 0,
+  // opencode: 0,
+  // anthropic: 1,
+  // openai: 3,
+  // google: 4,
 }
 
 export function createDialogProviderOptions() {
@@ -37,9 +37,9 @@ export function createDialogProviderOptions() {
           title: provider.name,
           value: provider.id,
           description: {
-            opencode: "(Recommended)",
-            anthropic: "(Claude Max or API key)",
-            openai: "(ChatGPT Plus/Pro or API key)",
+            // opencode: "(Recommended)",
+            // anthropic: "(Claude Max or API key)",
+            // openai: "(ChatGPT Plus/Pro or API key)",
           }[provider.id],
           category: provider.id in PROVIDER_PRIORITY ? "Popular" : "Other",
           footer: isConnected ? "Connected" : undefined,
@@ -226,7 +226,7 @@ function ApiMethod(props: ApiMethodProps) {
     <DialogPrompt
       title={props.title}
       placeholder="API key"
-      description={
+      /* description={
         props.providerID === "opencode" ? (
           <box gap={1}>
             <text fg={theme.textMuted}>
@@ -237,7 +237,7 @@ function ApiMethod(props: ApiMethodProps) {
             </text>
           </box>
         ) : undefined
-      }
+      } */
       onConfirm={async (value) => {
         if (!value) return
         await sdk.client.auth.set({

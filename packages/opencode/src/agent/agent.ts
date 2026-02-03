@@ -314,6 +314,7 @@ export namespace Agent {
       }),
     } satisfies Parameters<typeof generateObject>[0]
 
+    /* openai + OAuth codex detection commented out - only Copilot supported
     if (defaultModel.providerID === "openai" && (await Auth.get(defaultModel.providerID))?.type === "oauth") {
       const result = streamObject({
         ...params,
@@ -328,6 +329,7 @@ export namespace Agent {
       }
       return result.object
     }
+    */
 
     const result = await generateObject(params)
     return result.object

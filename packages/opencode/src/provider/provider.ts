@@ -4,6 +4,7 @@ import fuzzysort from "fuzzysort"
 import { Config } from "../config/config"
 import { mapValues, mergeDeep, omit, pickBy, sortBy } from "remeda"
 import { NoSuchModelError, type Provider as SDK } from "ai"
+import type { LanguageModelV2 } from "@ai-sdk/provider"
 import { Log } from "../util/log"
 import { BunProc } from "../bun"
 import { Plugin } from "../plugin"
@@ -15,7 +16,8 @@ import { Instance } from "../project/instance"
 import { Flag } from "../flag/flag"
 import { iife } from "@/util/iife"
 
-// Direct imports for bundled providers
+// NOTE: Non-Copilot providers commented out - only GitHub Copilot is supported
+/* Direct imports for bundled providers
 import { createAmazonBedrock, type AmazonBedrockProviderSettings } from "@ai-sdk/amazon-bedrock"
 import { createAnthropic } from "@ai-sdk/anthropic"
 import { createAzure } from "@ai-sdk/azure"
@@ -25,7 +27,9 @@ import { createVertexAnthropic } from "@ai-sdk/google-vertex/anthropic"
 import { createOpenAI } from "@ai-sdk/openai"
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible"
 import { createOpenRouter, type LanguageModelV2 } from "@openrouter/ai-sdk-provider"
+*/
 import { createOpenaiCompatible as createGitHubCopilotOpenAICompatible } from "./sdk/copilot"
+/*
 import { createXai } from "@ai-sdk/xai"
 import { createMistral } from "@ai-sdk/mistral"
 import { createGroq } from "@ai-sdk/groq"
@@ -37,6 +41,7 @@ import { createTogetherAI } from "@ai-sdk/togetherai"
 import { createPerplexity } from "@ai-sdk/perplexity"
 import { createVercel } from "@ai-sdk/vercel"
 import { createGitLab, VERSION as GITLAB_PROVIDER_VERSION } from "@gitlab/gitlab-ai-provider"
+*/
 import { ProviderTransform } from "./transform"
 import { Installation } from "../installation"
 
@@ -56,6 +61,8 @@ export namespace Provider {
   }
 
   const BUNDLED_PROVIDERS: Record<string, (options: any) => SDK> = {
+    // NOTE: Non-Copilot providers commented out
+    /*
     "@ai-sdk/amazon-bedrock": createAmazonBedrock,
     "@ai-sdk/anthropic": createAnthropic,
     "@ai-sdk/azure": createAzure,
@@ -76,7 +83,8 @@ export namespace Provider {
     "@ai-sdk/perplexity": createPerplexity,
     "@ai-sdk/vercel": createVercel,
     "@gitlab/gitlab-ai-provider": createGitLab,
-    // @ts-ignore (TODO: kill this code so we dont have to maintain it)
+    */
+    // @ts-ignore
     "@ai-sdk/github-copilot": createGitHubCopilotOpenAICompatible,
   }
 
@@ -88,6 +96,8 @@ export namespace Provider {
   }>
 
   const CUSTOM_LOADERS: Record<string, CustomLoader> = {
+    // NOTE: Non-Copilot loaders commented out
+    /*
     async anthropic() {
       return {
         autoload: false,
@@ -130,6 +140,7 @@ export namespace Provider {
         options: {},
       }
     },
+    */
     "github-copilot": async () => {
       return {
         autoload: false,
@@ -150,6 +161,7 @@ export namespace Provider {
         options: {},
       }
     },
+    /*
     azure: async () => {
       return {
         autoload: false,
@@ -519,6 +531,7 @@ export namespace Provider {
         },
       }
     },
+    */
   }
 
   export const Model = z
@@ -926,7 +939,8 @@ export namespace Provider {
 
       for (const [modelID, model] of Object.entries(provider.models)) {
         model.api.id = model.api.id ?? model.id ?? modelID
-        if (modelID === "gpt-5-chat-latest" || (providerID === "openrouter" && modelID === "openai/gpt-5-chat"))
+        // NOTE: openrouter check commented out - only Copilot supported
+        if (modelID === "gpt-5-chat-latest" /* || (providerID === "openrouter" && modelID === "openai/gpt-5-chat") */)
           delete provider.models[modelID]
         if (model.status === "alpha" && !Flag.OPENCODE_ENABLE_EXPERIMENTAL_MODELS) delete provider.models[modelID]
         if (model.status === "deprecated") delete provider.models[modelID]
@@ -978,9 +992,12 @@ export namespace Provider {
       const provider = s.providers[model.providerID]
       const options = { ...provider.options }
 
+      // NOTE: @ai-sdk/openai-compatible includeUsage commented out - provider removed
+      /*
       if (model.api.npm.includes("@ai-sdk/openai-compatible") && options["includeUsage"] !== false) {
         options["includeUsage"] = true
       }
+      */
 
       if (!options["baseURL"]) options["baseURL"] = model.api.url
       if (options["apiKey"] === undefined && provider.key) options["apiKey"] = provider.key
@@ -1011,6 +1028,8 @@ export namespace Provider {
           opts.signal = combined
         }
 
+        // NOTE: openai itemId stripping commented out - only Copilot supported
+        /*
         // Strip openai itemId metadata following what codex does
         // Codex uses #[serde(skip_serializing)] on id fields for all item types:
         // Message, Reasoning, FunctionCall, LocalShellCall, CustomToolCall, WebSearchCall
@@ -1028,6 +1047,7 @@ export namespace Provider {
             opts.body = JSON.stringify(body)
           }
         }
+        */
 
         return fetchFn(input, {
           ...opts,
@@ -1168,11 +1188,13 @@ export namespace Provider {
       }
     }
 
-    // Check if opencode provider is available before using it
+    // NOTE: opencode fallback commented out - only Copilot supported
+    /*
     const opencodeProvider = await state().then((state) => state.providers["opencode"])
     if (opencodeProvider && opencodeProvider.models["gpt-5-nano"]) {
       return getModel("opencode", "gpt-5-nano")
     }
+    */
 
     return undefined
   }

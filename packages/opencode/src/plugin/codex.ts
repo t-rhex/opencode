@@ -1,3 +1,4 @@
+// NOTE: Codex/ChatGPT OAuth plugin commented out - only Copilot is supported
 import type { Hooks, PluginInput } from "@opencode-ai/plugin"
 import { Log } from "../util/log"
 import { Installation } from "../installation"

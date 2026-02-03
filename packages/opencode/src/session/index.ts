@@ -444,17 +444,23 @@ export namespace Session {
     }),
     (input) => {
       const cacheReadInputTokens = input.usage.cachedInputTokens ?? 0
+      /* anthropic/bedrock/venice cache token extraction commented out - only Copilot supported
       const cacheWriteInputTokens = (input.metadata?.["anthropic"]?.["cacheCreationInputTokens"] ??
         // @ts-expect-error
         input.metadata?.["bedrock"]?.["usage"]?.["cacheWriteInputTokens"] ??
         // @ts-expect-error
         input.metadata?.["venice"]?.["usage"]?.["cacheCreationInputTokens"] ??
         0) as number
+      */
+      const cacheWriteInputTokens = 0
 
+      /* anthropic/bedrock excludesCachedTokens logic commented out - only Copilot supported
       const excludesCachedTokens = !!(input.metadata?.["anthropic"] || input.metadata?.["bedrock"])
       const adjustedInputTokens = excludesCachedTokens
         ? (input.usage.inputTokens ?? 0)
         : (input.usage.inputTokens ?? 0) - cacheReadInputTokens - cacheWriteInputTokens
+      */
+      const adjustedInputTokens = (input.usage.inputTokens ?? 0) - cacheReadInputTokens - cacheWriteInputTokens
       const safe = (value: number) => {
         if (!Number.isFinite(value)) return 0
         return value
