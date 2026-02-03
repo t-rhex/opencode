@@ -25,6 +25,7 @@ export interface RemoteConfig {
   keepaliveInterval?: number
   keepaliveCountMax?: number
   hostKeyCheck?: boolean
+  agentForward?: boolean
 }
 
 await Log.init({
@@ -159,6 +160,7 @@ export const rpc = {
         keepaliveInterval: config.keepaliveInterval,
         keepaliveCountMax: config.keepaliveCountMax,
         hostKeyCheck: config.hostKeyCheck,
+        agentForward: config.agentForward,
       },
       {
         onStateChange: (state) => {

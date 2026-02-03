@@ -1130,6 +1130,10 @@ export namespace Config {
                 keepaliveInterval: z.number().optional().describe("SSH keepalive interval in milliseconds"),
                 keepaliveCountMax: z.number().optional().describe("Max keepalive failures before reconnecting"),
                 hostKeyCheck: z.boolean().optional().describe("Whether to verify SSH host keys (default: true)"),
+                agentForward: z
+                  .boolean()
+                  .optional()
+                  .describe("Forward local SSH agent for git/SSH on remote (default: false)"),
               }),
             )
             .optional()

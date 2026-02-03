@@ -127,6 +127,7 @@ async function resolveRemoteConfig(
       keepaliveInterval: profile.keepaliveInterval,
       keepaliveCountMax: profile.keepaliveCountMax,
       hostKeyCheck: profile.hostKeyCheck ?? config.remote?.hostKeyCheck,
+      agentForward: profile.agentForward,
     }
   }
 

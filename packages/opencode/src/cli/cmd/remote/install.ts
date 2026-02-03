@@ -5,7 +5,7 @@ import * as prompts from "@clack/prompts"
 
 export const RemoteInstallCommand = cmd({
   command: "install <target>",
-  describe: "install opencode on remote host",
+  describe: "install opencode-remote on remote host",
   builder: (yargs) =>
     yargs
       .positional("target", {
@@ -33,7 +33,7 @@ export const RemoteInstallCommand = cmd({
       identity: args.identity,
     }
 
-    prompts.intro(`Installing opencode on ${args.target}`)
+    prompts.intro(`Installing opencode-remote on ${args.target}`)
 
     const spinner = prompts.spinner()
     spinner.start("Checking for existing installation...")
@@ -59,14 +59,14 @@ export const RemoteInstallCommand = cmd({
     await SSH.mkdir(sshOpts, "~/.opencode-remote/workspaces")
     spinner.stop("Directories created")
 
-    spinner.start("Downloading and installing opencode...")
+    spinner.start("Downloading and installing opencode-remote...")
     try {
       // The install script installs to ~/.opencode/bin by default
       // Run install, then copy to our location
       await SSH.exec(sshOpts, `curl -fsSL https://opencode.ai/install | bash`)
       // Copy to our remote bin directory
       await SSH.exec(sshOpts, `cp ~/.opencode/bin/opencode ~/.opencode-remote/bin/opencode-remote`)
-      await SSH.exec(sshOpts, `chmod 755 ~/.opencode-remote/bin/opencode`)
+      await SSH.exec(sshOpts, `chmod 755 ~/.opencode-remote/bin/opencode-remote`)
       spinner.stop("Installation complete")
     } catch (err) {
       spinner.stop("Installation failed")

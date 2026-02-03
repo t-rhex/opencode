@@ -28,6 +28,7 @@ export interface RemoteFilesystemOptions {
   privateKeyPath?: string
   password?: string
   agent?: string
+  agentForward?: boolean
   keepaliveInterval?: number
   keepaliveCountMax?: number
   readyTimeout?: number
@@ -80,6 +81,10 @@ export class RemoteFilesystem implements IFilesystem {
       config.password = opts.password
     } else {
       config.agent = opts.agent ?? process.env.SSH_AUTH_SOCK
+    }
+
+    if (opts.agentForward) {
+      config.agentForward = true
     }
 
     if (opts.hostKeyCheck === false) {

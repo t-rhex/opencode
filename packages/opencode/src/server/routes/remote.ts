@@ -9,8 +9,11 @@ import { errors } from "../error"
 import { lazy } from "../../util/lazy"
 import { SSHConfig } from "../../util/ssh-config"
 import { Config } from "../../config/config"
+import { createServer, type Server } from "net"
 
 const log = Log.create({ service: "server.remote" })
+
+const tunnels = new Map<number, Server>()
 
 function parseTarget(target: string, config: Config.Info) {
   const profile = config.remote?.profiles?.[target]
@@ -28,6 +31,7 @@ function parseTarget(target: string, config: Config.Info) {
       keepaliveInterval: profile.keepaliveInterval,
       keepaliveCountMax: profile.keepaliveCountMax,
       hostKeyCheck: profile.hostKeyCheck ?? config.remote?.hostKeyCheck,
+      agentForward: profile.agentForward,
     }
   }
 
@@ -109,6 +113,7 @@ export const RemoteRoutes = lazy(() =>
             keepaliveInterval: parsed.keepaliveInterval,
             keepaliveCountMax: parsed.keepaliveCountMax,
             hostKeyCheck: parsed.hostKeyCheck,
+            agentForward: parsed.agentForward,
           },
           {
             onStateChange: (state) => {
@@ -275,6 +280,139 @@ export const RemoteRoutes = lazy(() =>
             remoteDir: p.remoteDir,
           })),
         )
+      },
+    )
+    .post(
+      "/forward",
+      describeRoute({
+        summary: "Create port forward tunnel",
+        description: "Forward a local port to a remote port over the active SSH connection.",
+        operationId: "remote.forward",
+        responses: {
+          200: {
+            description: "Tunnel created",
+            content: {
+              "application/json": {
+                schema: resolver(
+                  z.object({
+                    localPort: z.number(),
+                    remotePort: z.number(),
+                  }),
+                ),
+              },
+            },
+          },
+          ...errors(400),
+        },
+      }),
+      validator(
+        "json",
+        z.object({
+          localPort: z.number().meta({ description: "Local port to listen on" }),
+          remotePort: z.number().optional().meta({ description: "Remote port to forward to (defaults to localPort)" }),
+        }),
+      ),
+      async (c) => {
+        const { localPort, remotePort: rp } = c.req.valid("json")
+        const remotePort = rp ?? localPort
+
+        if (tunnels.has(localPort)) {
+          return c.json({ error: `Port ${localPort} is already forwarded` }, { status: 400 })
+        }
+
+        const fs = CurrentFilesystem.get()
+        if (!(fs instanceof RemoteFilesystem)) {
+          return c.json({ error: "Not connected to a remote server" }, { status: 400 })
+        }
+
+        const client = fs.getSSHClient()
+        if (!client) {
+          return c.json({ error: "SSH client not available" }, { status: 400 })
+        }
+
+        const server = createServer((sock) => {
+          client.forwardOut("127.0.0.1", localPort, "127.0.0.1", remotePort, (err, stream) => {
+            if (err) {
+              log.warn("tunnel forward failed", { localPort, remotePort, error: err.message })
+              sock.end()
+              return
+            }
+            sock.pipe(stream).pipe(sock)
+            sock.on("error", () => stream.end())
+            stream.on("error", () => sock.end())
+          })
+        })
+
+        const result = await new Promise<{ ok: true } | { ok: false; error: string }>((resolve) => {
+          server.on("error", (err) => {
+            resolve({ ok: false, error: `Failed to listen on port ${localPort}: ${err.message}` })
+          })
+          server.listen(localPort, "127.0.0.1", () => {
+            tunnels.set(localPort, server)
+            log.info("port forward created", { localPort, remotePort })
+            resolve({ ok: true })
+          })
+        })
+
+        if (!result.ok) return c.json({ error: result.error }, { status: 400 })
+        return c.json({ localPort, remotePort })
+      },
+    )
+    .post(
+      "/forward/stop",
+      describeRoute({
+        summary: "Stop port forward tunnel",
+        description: "Stop a previously created port forward tunnel.",
+        operationId: "remote.forward.stop",
+        responses: {
+          200: {
+            description: "Tunnel stopped",
+            content: {
+              "application/json": {
+                schema: resolver(z.object({ stopped: z.literal(true) })),
+              },
+            },
+          },
+          ...errors(400),
+        },
+      }),
+      validator(
+        "json",
+        z.object({
+          localPort: z.number().meta({ description: "Local port of the tunnel to stop" }),
+        }),
+      ),
+      async (c) => {
+        const { localPort } = c.req.valid("json")
+        const server = tunnels.get(localPort)
+        if (!server) {
+          return c.json({ error: `No tunnel on port ${localPort}` }, { status: 400 })
+        }
+        server.close()
+        tunnels.delete(localPort)
+        log.info("port forward stopped", { localPort })
+        return c.json({ stopped: true as const })
+      },
+    )
+    .get(
+      "/forwards",
+      describeRoute({
+        summary: "List active port forwards",
+        description: "List all active port forward tunnels.",
+        operationId: "remote.forwards",
+        responses: {
+          200: {
+            description: "Active tunnels",
+            content: {
+              "application/json": {
+                schema: resolver(z.number().array()),
+              },
+            },
+          },
+        },
+      }),
+      async (c) => {
+        return c.json([...tunnels.keys()])
       },
     ),
 )

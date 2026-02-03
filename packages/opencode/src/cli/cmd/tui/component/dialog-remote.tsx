@@ -4,6 +4,7 @@ import { useRemote } from "@tui/context/remote"
 import { useDialog } from "@tui/ui/dialog"
 import { useRoute } from "@tui/context/route"
 import { useToast } from "@tui/ui/toast"
+import { useKV } from "@tui/context/kv"
 import { DialogSelect } from "@tui/ui/dialog-select"
 import { DialogPrompt } from "@tui/ui/dialog-prompt"
 
@@ -21,8 +22,10 @@ export function DialogRemote() {
   const dialog = useDialog()
   const route = useRoute()
   const toast = useToast()
+  const kv = useKV()
 
   const [profiles, setProfiles] = createSignal<Profile[]>([])
+  const [forwards, setForwards] = createSignal<number[]>([])
 
   const api = async (path: string, method = "GET", body?: unknown) => {
     const res = await sdk.fetch(`${sdk.url}/remote${path}`, {
@@ -34,8 +37,9 @@ export function DialogRemote() {
   }
 
   onMount(async () => {
-    const data = await api("/profiles")
-    if (Array.isArray(data)) setProfiles(data)
+    const [profileData, forwardData] = await Promise.all([api("/profiles"), api("/forwards")])
+    if (Array.isArray(profileData)) setProfiles(profileData)
+    if (Array.isArray(forwardData)) setForwards(forwardData)
   })
 
   const home = () => {
@@ -50,6 +54,7 @@ export function DialogRemote() {
       error: e instanceof Error ? e.message : String(e),
     }))
     if ("connected" in result && result.connected) {
+      kv.set("remote_last_target", target)
       toast.show({ variant: "success", message: `Connected to ${result.host}` })
       home()
       return
@@ -75,6 +80,7 @@ export function DialogRemote() {
         category: "Connection",
         onSelect: async () => {
           await api("/disconnect", "POST")
+          kv.set("remote_last_target", undefined)
           toast.show({ variant: "success", message: "Disconnected" })
           home()
         },
@@ -113,6 +119,62 @@ export function DialogRemote() {
         ))
       },
     })
+
+    // Port forwarding options (only when connected)
+    if (connected) {
+      items.push({
+        value: "forward",
+        title: "Forward port...",
+        description: "local:remote (e.g. 3000 or 3000:8080)",
+        category: "Port Forwarding",
+        onSelect: () => {
+          dialog.replace(() => (
+            <DialogPrompt
+              title="Forward port"
+              placeholder="3000 or 3000:8080"
+              onConfirm={async (value) => {
+                const trimmed = value.trim()
+                if (!trimmed) return dialog.clear()
+                const parts = trimmed.split(":")
+                const local = parseInt(parts[0], 10)
+                const remote = parts.length > 1 ? parseInt(parts[1], 10) : local
+                if (isNaN(local) || isNaN(remote)) {
+                  toast.show({ variant: "error", message: "Invalid port format" })
+                  dialog.clear()
+                  return
+                }
+                dialog.clear()
+                const result = await api("/forward", "POST", { localPort: local, remotePort: remote }).catch(
+                  (e: unknown) => ({ error: e instanceof Error ? e.message : String(e) }),
+                )
+                if ("error" in result) {
+                  toast.show({ variant: "error", message: result.error, duration: 5000 })
+                  return
+                }
+                setForwards((prev) => [...prev, local])
+                toast.show({ variant: "success", message: `Forwarding localhost:${local} -> remote:${remote}` })
+              }}
+              onCancel={() => dialog.clear()}
+            />
+          ))
+        },
+      })
+
+      for (const port of forwards()) {
+        items.push({
+          value: `stop-${port}`,
+          title: `Stop forward :${port}`,
+          description: `Close tunnel on port ${port}`,
+          category: "Port Forwarding",
+          onSelect: async () => {
+            dialog.clear()
+            await api("/forward/stop", "POST", { localPort: port }).catch(() => {})
+            setForwards((prev) => prev.filter((p) => p !== port))
+            toast.show({ variant: "success", message: `Stopped forward on port ${port}` })
+          },
+        })
+      }
+    }
 
     return items
   })

@@ -265,6 +265,21 @@ function App() {
     })
   })
 
+  // Offer reconnect to last remote if not already connected via --remote
+  let reconnectOffered = false
+  createEffect(() => {
+    if (reconnectOffered || sync.status !== "complete" || args.remote) return
+    reconnectOffered = true
+    const target = kv.get("remote_last_target")
+    if (!target) return
+    toast.show({
+      variant: "info",
+      title: "Remote",
+      message: `Last session: ${target}. Type /remote ${target} to reconnect.`,
+      duration: 8000,
+    })
+  })
+
   let continued = false
   createEffect(() => {
     // When using -c, session list is loaded in blocking phase, so we can navigate at "partial"

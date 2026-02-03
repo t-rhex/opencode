@@ -521,6 +521,41 @@ export function Prompt(props: PromptProps) {
       exit()
       return
     }
+
+    // Quick-connect: /remote user@host bypasses dialog
+    if (trimmed.startsWith("/remote ")) {
+      const target = trimmed.slice("/remote ".length).trim()
+      if (target) {
+        input.clear()
+        input.extmarks.clear()
+        setStore("prompt", { input: "", parts: [] })
+        setStore("extmarkToPartIndex", new Map())
+        toast.show({ variant: "info", message: `Connecting to ${target}...` })
+        sdk
+          .fetch(`${sdk.url}/remote/connect`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ target }),
+          })
+          .then((res) => res.json())
+          .then((result: any) => {
+            if (result.connected) {
+              kv.set("remote_last_target", target)
+              toast.show({ variant: "success", message: `Connected to ${result.host}` })
+              return
+            }
+            toast.show({ variant: "error", message: result.error ?? "Connection failed", duration: 10000 })
+          })
+          .catch((e: unknown) => {
+            toast.show({
+              variant: "error",
+              message: e instanceof Error ? e.message : String(e),
+              duration: 10000,
+            })
+          })
+        return
+      }
+    }
     const selectedModel = local.model.current()
     if (!selectedModel) {
       promptModelWarning()
