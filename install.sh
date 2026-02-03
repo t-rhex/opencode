@@ -100,7 +100,7 @@ main() {
   info "Downloading ${url}"
 
   tmp=$(mktemp -d)
-  trap 'rm -rf "$tmp"' EXIT
+  trap 'rm -rf "${tmp:-}"' EXIT
 
   curl -fsSL -o "${tmp}/${archive}" "$url" || error "Download failed. Check that version ${version} exists."
 
