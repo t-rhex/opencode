@@ -6,27 +6,35 @@ import { useRoute } from "@tui/context/route"
 import { useToast } from "@tui/ui/toast"
 import { DialogSelect } from "@tui/ui/dialog-select"
 
+interface Profile {
+  name: string
+  host: string
+  username?: string
+  port?: number
+  remoteDir?: string
+}
+
 export function DialogRemote() {
   const sdk = useSDK()
   const remote = useRemote()
   const dialog = useDialog()
   const route = useRoute()
   const toast = useToast()
-  const client = sdk.client as any
 
-  const [profiles, setProfiles] = createSignal<
-    Array<{
-      name: string
-      host: string
-      username?: string
-      port?: number
-      remoteDir?: string
-    }>
-  >([])
+  const [profiles, setProfiles] = createSignal<Profile[]>([])
+
+  const api = async (path: string, method = "GET", body?: unknown) => {
+    const res = await sdk.fetch(`${sdk.url}/remote${path}`, {
+      method,
+      headers: body ? { "Content-Type": "application/json" } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    })
+    return res.json()
+  }
 
   onMount(async () => {
-    const result = await client.remote.profiles()
-    if (result.data) setProfiles(result.data)
+    const data = await api("/profiles")
+    if (Array.isArray(data)) setProfiles(data)
   })
 
   const home = () => {
@@ -51,18 +59,14 @@ export function DialogRemote() {
         title: `Disconnect from ${state!.host}`,
         category: "Connection",
         onSelect: async () => {
-          await client.remote.disconnect()
-          toast.show({
-            variant: "success",
-            message: "Disconnected",
-          })
+          await api("/disconnect", "POST")
+          toast.show({ variant: "success", message: "Disconnected" })
           home()
         },
       })
     }
 
     const label = connected ? "Switch to" : "Connect to"
-    const category = "Profile"
 
     for (const p of profiles()) {
       if (connected && p.host === state!.host) continue
@@ -70,13 +74,10 @@ export function DialogRemote() {
         value: p.name,
         title: `${label} "${p.name}"`,
         description: p.username ? `${p.username}@${p.host}` : p.host,
-        category,
+        category: "Profile",
         onSelect: async () => {
-          await client.remote.connect({ target: p.name })
-          toast.show({
-            variant: "success",
-            message: `Connected to ${p.host}`,
-          })
+          await api("/connect", "POST", { target: p.name })
+          toast.show({ variant: "success", message: `Connected to ${p.host}` })
           home()
         },
       })
