@@ -184,7 +184,7 @@ function createGlobalSync() {
     reload: undefined | "pending" | "complete"
   }>({
     ready: false,
-    path: { state: "", config: "", worktree: "", directory: "", home: "" },
+    path: { state: "", config: "", worktree: "", directory: "", home: "", remote: false },
     project: projectCache.value,
     provider: { all: [], connected: [], default: {} },
     provider_auth: {},
@@ -387,7 +387,7 @@ function createGlobalSync() {
           icon: icon[0].value,
           provider: { all: [], connected: [], default: {} },
           config: {},
-          path: { state: "", config: "", worktree: "", directory: "", home: "" },
+          path: { state: "", config: "", worktree: "", directory: "", home: "", remote: false },
           status: "loading" as const,
           agent: [],
           command: [],
