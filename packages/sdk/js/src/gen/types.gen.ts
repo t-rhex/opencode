@@ -1425,6 +1425,7 @@ export type Diagnostics = {
     percent: number
   }
   load?: number
+  latency?: number
 } | null
 
 export type TextPartInput = {

@@ -19,6 +19,12 @@ export interface RemoteConfig {
   port: number
   privateKeyPath?: string
   remoteDir?: string
+  proxyJump?: string
+  env?: Record<string, string>
+  setupCommand?: string
+  keepaliveInterval?: number
+  keepaliveCountMax?: number
+  hostKeyCheck?: boolean
 }
 
 await Log.init({
@@ -149,6 +155,10 @@ export const rpc = {
         username: config.username,
         port: config.port,
         privateKeyPath: config.privateKeyPath,
+        proxyJump: config.proxyJump,
+        keepaliveInterval: config.keepaliveInterval,
+        keepaliveCountMax: config.keepaliveCountMax,
+        hostKeyCheck: config.hostKeyCheck,
       },
       {
         onStateChange: (state) => {
@@ -176,6 +186,27 @@ export const rpc = {
     }
 
     CurrentFilesystem.set(fs)
+
+    // Check for required tools on remote
+    const tools = ["git", "bash", "find", "grep"]
+    const missing: string[] = []
+    for (const tool of tools) {
+      const check = await fs
+        .exec(`command -v ${tool} 2>/dev/null`)
+        .catch(() => ({ exitCode: 1, stdout: "", stderr: "" }))
+      if (check.exitCode !== 0) missing.push(tool)
+    }
+    if (missing.length > 0) {
+      Log.Default.warn("remote missing tools", { missing })
+    }
+
+    if (config.setupCommand) {
+      Log.Default.info("running remote setup command", { command: config.setupCommand })
+      await fs.exec(config.setupCommand).catch((err) => {
+        Log.Default.warn("remote setup command failed", { error: err instanceof Error ? err.message : String(err) })
+      })
+    }
+
     Log.Default.info("remote filesystem connected", { host: config.host, port: config.port })
     return { connected: true }
   },

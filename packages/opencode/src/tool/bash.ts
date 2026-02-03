@@ -253,21 +253,54 @@ export const BashTool = Tool.define("bash", async () => {
         exitCode = proc.exitCode ?? 0
       } else {
         log.info("executing remote command", { command: params.command, cwd, timeout })
-        const result = await fs.execStream(
-          params.command,
-          { cwd, timeout },
-          (chunk) => {
-            output += chunk
-            updateMetadata()
-          },
-          (chunk) => {
-            output += chunk
-            updateMetadata()
-          },
-        )
-        log.info("remote command completed", { exitCode: result.exitCode })
-        exitCode = result.exitCode
-        timedOut = exitCode === 124
+
+        const abortable = "execStreamAbortable" in fs && typeof (fs as any).execStreamAbortable === "function"
+
+        if (abortable) {
+          const { result: pending, kill } = (fs as any).execStreamAbortable(
+            params.command,
+            { cwd, timeout },
+            (chunk: string) => {
+              output += chunk
+              updateMetadata()
+            },
+            (chunk: string) => {
+              output += chunk
+              updateMetadata()
+            },
+          )
+
+          if (aborted) kill()
+
+          const remoteAbortHandler = () => {
+            aborted = true
+            kill()
+          }
+          ctx.abort.addEventListener("abort", remoteAbortHandler, { once: true })
+
+          const result = await pending
+          ctx.abort.removeEventListener("abort", remoteAbortHandler)
+
+          log.info("remote command completed", { exitCode: result.exitCode })
+          exitCode = result.exitCode
+          timedOut = exitCode === 124
+        } else {
+          const result = await fs.execStream(
+            params.command,
+            { cwd, timeout },
+            (chunk) => {
+              output += chunk
+              updateMetadata()
+            },
+            (chunk) => {
+              output += chunk
+              updateMetadata()
+            },
+          )
+          log.info("remote command completed", { exitCode: result.exitCode })
+          exitCode = result.exitCode
+          timedOut = exitCode === 124
+        }
       }
 
       ctx.abort.removeEventListener("abort", abortHandler)

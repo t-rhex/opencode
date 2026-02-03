@@ -19,6 +19,7 @@ export namespace Diagnostics {
         })
         .optional(),
       load: z.number().optional(),
+      latency: z.number().optional(),
     })
     .meta({ ref: "Diagnostics" })
   export type Info = z.infer<typeof Info>
@@ -43,18 +44,40 @@ export namespace Diagnostics {
   }
 
   function parseMemoryOutput(stdout: string): Info["memory"] {
-    // Parse free -b output (bytes)
-    // Example: Mem: 8000000000 4000000000 2000000000 ...
     const lines = stdout.trim().split("\n")
+
+    // Try free -b format first
     const memLine = lines.find((l) => l.startsWith("Mem:"))
-    if (!memLine) return undefined
+    if (memLine) {
+      const parts = memLine.split(/\s+/)
+      if (parts.length < 3) return undefined
+      const total = parseInt(parts[1], 10)
+      const used = parseInt(parts[2], 10)
+      if (isNaN(total) || isNaN(used)) return undefined
+      const percent = Math.round((used / total) * 100)
+      return { used, total, percent }
+    }
 
-    const parts = memLine.split(/\s+/)
-    if (parts.length < 3) return undefined
+    // Try macOS vm_stat format
+    const header = lines.find((l) => l.includes("page size of"))
+    if (!header) return undefined
+    const pageMatch = header.match(/page size of (\d+)/)
+    if (!pageMatch) return undefined
+    const pageSize = parseInt(pageMatch[1], 10)
 
-    const total = parseInt(parts[1], 10)
-    const used = parseInt(parts[2], 10)
+    const page = (name: string) => {
+      const line = lines.find((l) => l.startsWith(name))
+      if (!line) return 0
+      const match = line.match(/(\d+)/)
+      return match ? parseInt(match[1], 10) : 0
+    }
 
+    const used =
+      (page("Pages active:") + page("Pages inactive:") + page("Pages speculative:") + page("Pages wired down:")) *
+      pageSize
+    const totalMatch = stdout.match(/hw\.memsize:\s*(\d+)/)
+    if (!totalMatch) return undefined
+    const total = parseInt(totalMatch[1], 10)
     if (isNaN(total) || isNaN(used)) return undefined
     const percent = Math.round((used / total) * 100)
     return { used, total, percent }
@@ -84,9 +107,15 @@ export namespace Diagnostics {
 
     const fs = CurrentFilesystem.get()
 
+    const latencyStart = Date.now()
+    await fs.exec("echo 1", { timeout: 5000 }).catch(() => {})
+    const latency = Date.now() - latencyStart
+
     const [diskResult, memResult, loadResult] = await Promise.all([
       fs.exec("df -P / 2>/dev/null | tail -1").catch(() => ({ stdout: "", stderr: "", exitCode: 1 })),
-      fs.exec("free -b 2>/dev/null || vm_stat 2>/dev/null").catch(() => ({ stdout: "", stderr: "", exitCode: 1 })),
+      fs
+        .exec("free -b 2>/dev/null || (vm_stat && sysctl hw.memsize) 2>/dev/null")
+        .catch(() => ({ stdout: "", stderr: "", exitCode: 1 })),
       fs.exec("cat /proc/loadavg 2>/dev/null || uptime").catch(() => ({ stdout: "", stderr: "", exitCode: 1 })),
     ])
 
@@ -94,6 +123,7 @@ export namespace Diagnostics {
       disk: diskResult.exitCode === 0 ? parseDiskOutput(diskResult.stdout) : undefined,
       memory: memResult.exitCode === 0 ? parseMemoryOutput(memResult.stdout) : undefined,
       load: loadResult.exitCode === 0 ? parseLoadOutput(loadResult.stdout) : undefined,
+      latency,
     }
   }
 }

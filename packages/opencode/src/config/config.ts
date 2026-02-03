@@ -1122,11 +1122,23 @@ export namespace Config {
                 port: z.number().optional().describe("SSH port (default: 22)"),
                 identity: z.string().optional().describe("Path to SSH private key"),
                 remoteDir: z.string().optional().describe("Working directory on remote server"),
+                env: z.record(z.string(), z.string()).optional().describe("Environment variables to set on remote"),
+                setupCommand: z
+                  .string()
+                  .optional()
+                  .describe("Command to run before starting (e.g., source ~/.nvm/nvm.sh)"),
+                keepaliveInterval: z.number().optional().describe("SSH keepalive interval in milliseconds"),
+                keepaliveCountMax: z.number().optional().describe("Max keepalive failures before reconnecting"),
+                hostKeyCheck: z.boolean().optional().describe("Whether to verify SSH host keys (default: true)"),
               }),
             )
             .optional()
             .describe("Named connection profiles for remote development"),
           default: z.string().optional().describe("Default profile to use when --remote flag has no value"),
+          hostKeyCheck: z
+            .boolean()
+            .optional()
+            .describe("Whether to verify SSH host keys for all profiles (default: true)"),
         })
         .optional()
         .describe("Remote SSH development configuration"),

@@ -121,6 +121,12 @@ async function resolveRemoteConfig(
       port: options.port ?? profile.port ?? sshConfig.port ?? 22,
       privateKeyPath: options.identity ?? profile.identity ?? sshConfig.identityFile,
       remoteDir: options.remoteDir ?? profile.remoteDir,
+      proxyJump: sshConfig.proxyJump,
+      env: profile.env,
+      setupCommand: profile.setupCommand,
+      keepaliveInterval: profile.keepaliveInterval,
+      keepaliveCountMax: profile.keepaliveCountMax,
+      hostKeyCheck: profile.hostKeyCheck ?? config.remote?.hostKeyCheck,
     }
   }
 
@@ -135,6 +141,8 @@ async function resolveRemoteConfig(
     port: options.port ?? parsed.port ?? sshConfig.port ?? 22,
     privateKeyPath: options.identity ?? parsed.privateKeyPath ?? sshConfig.identityFile,
     remoteDir: options.remoteDir ?? parsed.remoteDir,
+    proxyJump: sshConfig.proxyJump,
+    hostKeyCheck: config.remote?.hostKeyCheck,
   }
 }
 
@@ -188,6 +196,11 @@ export const TuiThreadCommand = cmd({
       .option("remote-dir", {
         type: "string",
         describe: "working directory on remote server (defaults to home directory)",
+      })
+      .option("forward-port", {
+        type: "string",
+        alias: ["L"],
+        describe: "forward a remote port to local (e.g., 3000 or 3000:8080)",
       }),
   handler: async (args) => {
     const baseCwd = process.env.PWD ?? process.cwd()
@@ -266,6 +279,32 @@ export const TuiThreadCommand = cmd({
       } catch (e) {
         UI.error(`Failed to connect to remote: ${e instanceof Error ? e.message : e}`)
         return
+      }
+
+      if (args.forwardPort) {
+        const parts = String(args.forwardPort).split(":")
+        const local = parseInt(parts[0], 10)
+        const remote = parts.length > 1 ? parseInt(parts[1], 10) : local
+
+        const sshArgs = [
+          "-o",
+          "StrictHostKeyChecking=no",
+          "-o",
+          "UserKnownHostsFile=/dev/null",
+          "-N",
+          "-L",
+          `${local}:127.0.0.1:${remote}`,
+        ]
+        if (remoteConfig!.privateKeyPath) sshArgs.push("-i", remoteConfig!.privateKeyPath)
+        sshArgs.push("-p", String(remoteConfig!.port))
+        sshArgs.push(`${remoteConfig!.username}@${remoteConfig!.host}`)
+
+        const { spawn: spawnProcess } = await import("child_process")
+        const tunnel = spawnProcess("ssh", sshArgs, { stdio: "ignore", detached: true })
+        tunnel.unref()
+
+        process.on("exit", () => tunnel.kill())
+        UI.println(`Port forwarding: localhost:${local} -> remote:${remote}`)
       }
     }
 

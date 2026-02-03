@@ -1,9 +1,11 @@
 import { cmd } from "../cmd"
 import { RemoteConnectCommand } from "./connect"
+import { RemoteDownloadCommand } from "./download"
 import { RemoteInstallCommand } from "./install"
 import { RemoteStartCommand } from "./start"
 import { RemoteStatusCommand } from "./status"
 import { RemoteStopCommand } from "./stop"
+import { RemoteUploadCommand } from "./upload"
 
 export const RemoteCommand = cmd({
   command: "remote",
@@ -15,6 +17,8 @@ export const RemoteCommand = cmd({
       .command(RemoteConnectCommand)
       .command(RemoteStopCommand)
       .command(RemoteStatusCommand)
+      .command(RemoteUploadCommand)
+      .command(RemoteDownloadCommand)
       .demandCommand()
       .epilog(
         `Connection profiles can be configured in ~/.config/opencode/config.json:

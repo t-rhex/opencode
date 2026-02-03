@@ -31,10 +31,13 @@ export interface RemoteFilesystemOptions {
   keepaliveInterval?: number
   keepaliveCountMax?: number
   readyTimeout?: number
+  proxyJump?: string
+  hostKeyCheck?: boolean
 }
 
 export class RemoteFilesystem implements IFilesystem {
   private client: Client | null = null
+  private jumpClient: Client | null = null
   private sftp: SFTPWrapper | null = null
   private options: RemoteFilesystemOptions
   private config: ConnectConfig
@@ -79,6 +82,32 @@ export class RemoteFilesystem implements IFilesystem {
       config.agent = opts.agent ?? process.env.SSH_AUTH_SOCK
     }
 
+    if (opts.hostKeyCheck === false) {
+      // @ts-ignore - ssh2 supports this but types may not expose it
+      config.hostVerifier = () => true
+    }
+
+    return config
+  }
+
+  private parseJumpHost(jump: string): ConnectConfig {
+    const config: ConnectConfig = {}
+    const idx = jump.lastIndexOf("@")
+    if (idx !== -1) {
+      config.username = jump.slice(0, idx)
+      const rest = jump.slice(idx + 1)
+      const colon = rest.lastIndexOf(":")
+      if (colon !== -1) {
+        config.host = rest.slice(0, colon)
+        config.port = parseInt(rest.slice(colon + 1), 10)
+      } else {
+        config.host = rest
+      }
+    } else {
+      config.host = jump
+    }
+    config.port = config.port || 22
+    config.agent = process.env.SSH_AUTH_SOCK
     return config
   }
 
@@ -200,7 +229,7 @@ export class RemoteFilesystem implements IFilesystem {
   private connectInternal(): Promise<void> {
     const connectionTimeout = 30000
 
-    this.connecting = new Promise((resolve, reject) => {
+    this.connecting = new Promise(async (resolve, reject) => {
       const client = new Client()
 
       const timer = setTimeout(() => {
@@ -227,7 +256,32 @@ export class RemoteFilesystem implements IFilesystem {
         this.sftp = null
       })
 
-      client.connect(this.config)
+      if (this.options.proxyJump) {
+        const jumpConfig = this.parseJumpHost(this.options.proxyJump)
+        const jump = new Client()
+
+        jump.on("ready", () => {
+          this.jumpClient = jump
+          jump.forwardOut("127.0.0.1", 0, this.config.host!, this.config.port!, (err, stream) => {
+            if (err) {
+              clearTimeout(timer)
+              jump.end()
+              reject(err)
+              return
+            }
+            client.connect({ ...this.config, sock: stream })
+          })
+        })
+
+        jump.on("error", (err) => {
+          clearTimeout(timer)
+          reject(err)
+        })
+
+        jump.connect(jumpConfig)
+      } else {
+        client.connect(this.config)
+      }
     })
 
     return this.connecting
@@ -242,6 +296,10 @@ export class RemoteFilesystem implements IFilesystem {
     if (this.client) {
       this.client.end()
       this.client = null
+    }
+    if (this.jumpClient) {
+      this.jumpClient.end()
+      this.jumpClient = null
     }
     this.connecting = null
     this.reconnecting = null
@@ -436,7 +494,12 @@ export class RemoteFilesystem implements IFilesystem {
     const cwd = options?.cwd
     const timeout = options?.timeout || 120000
 
-    const fullCommand = cwd ? `cd "${cwd}" && ${command}` : command
+    const envPrefix = options?.env
+      ? Object.entries(options.env)
+          .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+          .join(" ") + " "
+      : ""
+    const fullCommand = cwd ? `cd "${cwd}" && ${envPrefix}${command}` : `${envPrefix}${command}`
 
     return new Promise((resolve, reject) => {
       let timedOut = false
@@ -492,7 +555,12 @@ export class RemoteFilesystem implements IFilesystem {
     const cwd = options?.cwd
     const timeout = options?.timeout || 120000
 
-    const fullCommand = cwd ? `cd "${cwd}" && ${command}` : command
+    const envPrefix = options?.env
+      ? Object.entries(options.env)
+          .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+          .join(" ") + " "
+      : ""
+    const fullCommand = cwd ? `cd "${cwd}" && ${envPrefix}${command}` : `${envPrefix}${command}`
 
     return new Promise((resolve, reject) => {
       let timedOut = false
@@ -542,9 +610,83 @@ export class RemoteFilesystem implements IFilesystem {
     })
   }
 
+  execStreamAbortable(
+    command: string,
+    options: ExecOptions | undefined,
+    onStdout: (chunk: string) => void,
+    onStderr: (chunk: string) => void,
+  ): { result: Promise<ExecResult>; kill: () => void } {
+    let stream: any = null
+    const client = this.ensureConnected()
+    const cwd = options?.cwd
+    const timeout = options?.timeout || 120000
+    const envPrefix = options?.env
+      ? Object.entries(options.env)
+          .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+          .join(" ") + " "
+      : ""
+    const fullCommand = cwd ? `cd "${cwd}" && ${envPrefix}${command}` : `${envPrefix}${command}`
+
+    const kill = () => {
+      if (stream) {
+        stream.signal("KILL")
+        stream.close()
+      }
+    }
+
+    const result = client.then(
+      (c) =>
+        new Promise<ExecResult>((resolve, reject) => {
+          let timedOut = false
+          const timer = setTimeout(() => {
+            timedOut = true
+            kill()
+          }, timeout)
+
+          c.exec(fullCommand, (err, s) => {
+            if (err) {
+              clearTimeout(timer)
+              reject(err)
+              return
+            }
+
+            stream = s
+            let stdout = ""
+            let stderr = ""
+
+            stream.on("data", (data: Buffer) => {
+              const str = data.toString()
+              stdout += str
+              onStdout(str)
+            })
+
+            stream.stderr.on("data", (data: Buffer) => {
+              const str = data.toString()
+              stderr += str
+              onStderr(str)
+            })
+
+            stream.on("close", (code: number) => {
+              clearTimeout(timer)
+              if (timedOut) {
+                resolve({ stdout, stderr, exitCode: 124 })
+              } else {
+                resolve({ stdout, stderr, exitCode: code ?? 0 })
+              }
+            })
+          })
+        }),
+    )
+
+    return { result, kill }
+  }
+
   async glob(pattern: string, cwd: string): Promise<string[]> {
-    const escaped = pattern.replace(/"/g, '\\"')
-    const result = await this.exec(`find . -path "./${escaped}" -type f 2>/dev/null | sed 's|^\\./||' || true`, { cwd })
+    const escaped = pattern.replace(/'/g, "'\\''")
+    const result = await this.exec(
+      `bash -c 'shopt -s globstar nullglob; for f in ${escaped}; do [ -f "$f" ] && echo "$f"; done'`,
+      { cwd },
+    )
     return result.stdout
       .trim()
       .split("\n")

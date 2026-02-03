@@ -64,7 +64,10 @@ const ConnectionStatus = () => {
   return (
     <Switch fallback={null}>
       <Match when={state.status === "connected"}>
-        <text fg={theme.success}>SSH: {host()}</text>
+        <text fg={theme.success}>
+          SSH: {host()}
+          {sync.data.diagnostics?.latency ? ` (${sync.data.diagnostics.latency}ms)` : ""}
+        </text>
       </Match>
       <Match when={state.status === "connecting"}>
         <text fg={theme.warning}>SSH: connecting...</text>
