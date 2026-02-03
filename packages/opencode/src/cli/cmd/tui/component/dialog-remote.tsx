@@ -94,13 +94,13 @@ export function DialogRemote() {
     items.push({
       value: "add",
       title: "Add server...",
-      description: "user@host or user@host:port",
+      description: "user@host or profile name",
       category: "New",
       onSelect: () => {
         dialog.replace(() => (
           <DialogPrompt
             title="Connect to remote server"
-            placeholder="user@host:port"
+            placeholder="user@host"
             onConfirm={(value) => {
               if (!value.trim()) return dialog.clear()
               connect(value.trim())
