@@ -5,6 +5,7 @@ import { useDialog } from "@tui/ui/dialog"
 import { useRoute } from "@tui/context/route"
 import { useToast } from "@tui/ui/toast"
 import { DialogSelect } from "@tui/ui/dialog-select"
+import { DialogPrompt } from "@tui/ui/dialog-prompt"
 
 interface Profile {
   name: string
@@ -42,6 +43,17 @@ export function DialogRemote() {
     dialog.clear()
   }
 
+  const connect = async (target: string) => {
+    toast.show({ variant: "info", message: `Connecting to ${target}...` })
+    const result = await api("/connect", "POST", { target })
+    if (result.connected) {
+      toast.show({ variant: "success", message: `Connected to ${result.host}` })
+      home()
+      return
+    }
+    toast.show({ variant: "error", message: result.error ?? "Connection failed" })
+  }
+
   const options = createMemo(() => {
     const state = remote.state
     const connected = state?.status === "connected"
@@ -75,13 +87,29 @@ export function DialogRemote() {
         title: `${label} "${p.name}"`,
         description: p.username ? `${p.username}@${p.host}` : p.host,
         category: "Profile",
-        onSelect: async () => {
-          await api("/connect", "POST", { target: p.name })
-          toast.show({ variant: "success", message: `Connected to ${p.host}` })
-          home()
-        },
+        onSelect: () => connect(p.name),
       })
     }
+
+    items.push({
+      value: "add",
+      title: "Add server...",
+      description: "user@host or user@host:port",
+      category: "New",
+      onSelect: () => {
+        dialog.replace(() => (
+          <DialogPrompt
+            title="Connect to remote server"
+            placeholder="user@host:port"
+            onConfirm={(value) => {
+              if (!value.trim()) return dialog.clear()
+              connect(value.trim())
+            }}
+            onCancel={() => dialog.clear()}
+          />
+        ))
+      },
+    })
 
     return items
   })
