@@ -1,6 +1,7 @@
 import { Instance } from "../project/instance"
 import { Log } from "../util/log"
 import { Flag } from "../flag/flag"
+import { CurrentFilesystem } from "../fs"
 
 export namespace FileTime {
   const log = Log.create({ service: "file.time" })
@@ -59,7 +60,8 @@ export namespace FileTime {
 
     const time = get(sessionID, filepath)
     if (!time) throw new Error(`You must read file ${filepath} before overwriting it. Use the Read tool first`)
-    const stats = await Bun.file(filepath).stat()
+    const fs = CurrentFilesystem.get()
+    const stats = await fs.stat(filepath)
     if (stats.mtime.getTime() > time.getTime()) {
       throw new Error(
         `File ${filepath} has been modified since it was last read.\nLast modification: ${stats.mtime.toISOString()}\nLast read: ${time.toISOString()}\n\nPlease read the file again before modifying it.`,

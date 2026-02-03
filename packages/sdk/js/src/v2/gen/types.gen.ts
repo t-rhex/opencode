@@ -829,6 +829,15 @@ export type EventVcsBranchUpdated = {
   }
 }
 
+export type EventVcsUpdated = {
+  type: "vcs.updated"
+  properties: {
+    branch?: string
+    staged: number
+    unstaged: number
+  }
+}
+
 export type Pty = {
   id: string
   title: string
@@ -920,6 +929,7 @@ export type Event =
   | EventSessionDiff
   | EventSessionError
   | EventVcsBranchUpdated
+  | EventVcsUpdated
   | EventPtyCreated
   | EventPtyUpdated
   | EventPtyExited
@@ -2109,8 +2119,24 @@ export type Path = {
 }
 
 export type VcsInfo = {
-  branch: string
+  branch?: string
+  staged: number
+  unstaged: number
 }
+
+export type Diagnostics = {
+  disk?: {
+    used: number
+    total: number
+    percent: number
+  }
+  memory?: {
+    used: number
+    total: number
+    percent: number
+  }
+  load?: number
+} | null
 
 export type Command = {
   name: string
@@ -4814,6 +4840,24 @@ export type VcsGetResponses = {
 }
 
 export type VcsGetResponse = VcsGetResponses[keyof VcsGetResponses]
+
+export type DiagnosticsGetData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+  }
+  url: "/diagnostics"
+}
+
+export type DiagnosticsGetResponses = {
+  /**
+   * Diagnostics info
+   */
+  200: Diagnostics
+}
+
+export type DiagnosticsGetResponse = DiagnosticsGetResponses[keyof DiagnosticsGetResponses]
 
 export type CommandListData = {
   body?: never

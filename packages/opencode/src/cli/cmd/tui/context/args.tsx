@@ -1,11 +1,18 @@
 import { createSimpleContext } from "./helper"
 
+export interface RemoteInfo {
+  host: string
+  username: string
+  port: number
+}
+
 export interface Args {
   model?: string
   agent?: string
   prompt?: string
   continue?: boolean
   sessionID?: string
+  remote?: RemoteInfo
 }
 
 export const { use: useArgs, provider: ArgsProvider } = createSimpleContext({

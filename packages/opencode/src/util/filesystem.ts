@@ -1,5 +1,6 @@
 import { realpathSync } from "fs"
 import { dirname, join, relative } from "path"
+import { CurrentFilesystem, type IFilesystem } from "../fs"
 
 export namespace Filesystem {
   export const exists = (p: string) =>
@@ -36,12 +37,13 @@ export namespace Filesystem {
     return !relative(parent, child).startsWith("..")
   }
 
-  export async function findUp(target: string, start: string, stop?: string) {
+  export async function findUp(target: string, start: string, stop?: string, fs?: IFilesystem) {
+    const filesystem = fs ?? CurrentFilesystem.get()
     let current = start
     const result = []
     while (true) {
       const search = join(current, target)
-      if (await exists(search)) result.push(search)
+      if (await filesystem.exists(search)) result.push(search)
       if (stop === current) break
       const parent = dirname(current)
       if (parent === current) break

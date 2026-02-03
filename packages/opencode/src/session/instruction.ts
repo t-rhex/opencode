@@ -82,7 +82,8 @@ export namespace InstructionPrompt {
     }
 
     for (const file of globalFiles()) {
-      if (await Bun.file(file).exists()) {
+      const exists = await Bun.file(file).exists()
+      if (exists) {
         paths.add(path.resolve(file))
         break
       }
@@ -113,11 +114,15 @@ export namespace InstructionPrompt {
   export async function system() {
     const config = await Config.get()
     const paths = await systemPaths()
+    const worktree = Instance.worktree
 
     const files = Array.from(paths).map(async (p) => {
-      const content = await Bun.file(p)
-        .text()
-        .catch(() => "")
+      const isProjectFile = Filesystem.contains(worktree, p)
+      const content = isProjectFile
+        ? await Instance.fs.read(p).catch(() => "")
+        : await Bun.file(p)
+            .text()
+            .catch(() => "")
       return content ? "Instructions from: " + p + "\n" + content : ""
     })
 
@@ -159,7 +164,7 @@ export namespace InstructionPrompt {
   export async function find(dir: string) {
     for (const file of FILES) {
       const filepath = path.resolve(path.join(dir, file))
-      if (await Bun.file(filepath).exists()) return filepath
+      if (await Instance.fs.exists(filepath)) return filepath
     }
   }
 
@@ -175,9 +180,7 @@ export namespace InstructionPrompt {
       const found = await find(current)
       if (found && !system.has(found) && !already.has(found) && !isClaimed(messageID, found)) {
         claim(messageID, found)
-        const content = await Bun.file(found)
-          .text()
-          .catch(() => undefined)
+        const content = await Instance.fs.read(found).catch(() => undefined)
         if (content) {
           results.push({ filepath: found, content: "Instructions from: " + found + "\n" + content })
         }

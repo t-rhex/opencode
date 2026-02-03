@@ -9,6 +9,8 @@ import { useCommandDialog } from "@tui/component/dialog-command"
 import { useKeybind } from "../../context/keybind"
 import { Installation } from "@/installation"
 import { useTerminalDimensions } from "@opentui/solid"
+import { useArgs } from "@tui/context/args"
+import { useRemote } from "@tui/context/remote"
 
 const Title = (props: { session: Accessor<Session> }) => {
   const { theme } = useTheme()
@@ -30,15 +32,100 @@ const ContextInfo = (props: { context: Accessor<string | undefined>; cost: Acces
   )
 }
 
+const ConnectionStatus = () => {
+  const sync = useSync()
+  const remote = useRemote()
+  const args = useArgs()
+  const { theme } = useTheme()
+
+  // If not remote, don't show anything
+  if (!sync.data.path.remote) return null
+
+  const state = remote.state
+  const host = createMemo(() => {
+    if (args.remote) {
+      const r = args.remote
+      const port = r.port !== 22 ? `:${r.port}` : ""
+      return `${r.username}@${r.host}${port}`
+    }
+    return state?.host ?? "remote"
+  })
+
+  // No state yet means we're connected (initial state before any changes)
+  if (!state) {
+    return <text fg={theme.success}>SSH: {host()}</text>
+  }
+
+  const retryCountdown = createMemo(() => {
+    if (state.status !== "reconnecting" || !state.nextRetryAt) return 0
+    return Math.max(0, Math.ceil((state.nextRetryAt.getTime() - Date.now()) / 1000))
+  })
+
+  return (
+    <Switch fallback={null}>
+      <Match when={state.status === "connected"}>
+        <text fg={theme.success}>SSH: {host()}</text>
+      </Match>
+      <Match when={state.status === "connecting"}>
+        <text fg={theme.warning}>SSH: connecting...</text>
+      </Match>
+      <Match when={state.status === "reconnecting"}>
+        <text fg={theme.warning}>
+          SSH: reconnecting ({state.reconnectAttempt}/10)
+          {retryCountdown() > 0 ? ` ${retryCountdown()}s` : ""}
+        </text>
+      </Match>
+      <Match when={state.status === "error"}>
+        <text fg={theme.error}>SSH: disconnected</text>
+      </Match>
+      <Match when={state.status === "disconnected"}>
+        <text fg={theme.textMuted}>SSH: disconnected</text>
+      </Match>
+    </Switch>
+  )
+}
+
+const GitStatus = () => {
+  const sync = useSync()
+  const { theme } = useTheme()
+
+  const vcs = createMemo(() => sync.data.vcs)
+
+  return (
+    <Show when={vcs()?.branch}>
+      <text fg={theme.textMuted}>
+        {vcs()?.branch}
+        <Show when={vcs()!.staged > 0}>
+          <span style={{ fg: theme.success }}> +{vcs()!.staged}</span>
+        </Show>
+        <Show when={vcs()!.unstaged > 0}>
+          <span style={{ fg: theme.warning }}> ~{vcs()!.unstaged}</span>
+        </Show>
+      </text>
+    </Show>
+  )
+}
+
 const ModeInfo = () => {
   const sync = useSync()
   const { theme } = useTheme()
-  const label = createMemo(() => {
-    if (sync.data.path.remote) return "remote"
-    if (sync.data.vcs?.branch) return sync.data.vcs.branch
-    return `v${Installation.VERSION}`
-  })
-  return <text fg={theme.textMuted}>{label()}</text>
+
+  // If remote, show git status alongside connection status
+  if (sync.data.path.remote) {
+    return (
+      <box flexDirection="row" gap={1}>
+        <GitStatus />
+        <ConnectionStatus />
+      </box>
+    )
+  }
+
+  // Local mode - show git status or version
+  if (sync.data.vcs?.branch) {
+    return <GitStatus />
+  }
+
+  return <text fg={theme.textMuted}>v{Installation.VERSION}</text>
 }
 
 export function Header() {

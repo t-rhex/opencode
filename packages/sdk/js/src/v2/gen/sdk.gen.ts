@@ -163,6 +163,7 @@ import type {
   TuiShowToastResponses,
   TuiSubmitPromptResponses,
   VcsGetResponses,
+  DiagnosticsGetResponses,
   WorktreeCreateErrors,
   WorktreeCreateInput,
   WorktreeCreateResponses,
@@ -3011,6 +3012,27 @@ export class Vcs extends HeyApiClient {
   }
 }
 
+export class Diagnostics extends HeyApiClient {
+  /**
+   * Get remote diagnostics
+   *
+   * Retrieve system diagnostics (disk, memory, load) for remote connections.
+   */
+  public get<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "directory" }] }])
+    return (options?.client ?? this.client).get<DiagnosticsGetResponses, unknown, ThrowOnError>({
+      url: "/diagnostics",
+      ...options,
+      ...params,
+    })
+  }
+}
+
 export class Command extends HeyApiClient {
   /**
    * List commands
@@ -3284,6 +3306,11 @@ export class OpencodeClient extends HeyApiClient {
   private _vcs?: Vcs
   get vcs(): Vcs {
     return (this._vcs ??= new Vcs({ client: this.client }))
+  }
+
+  private _diagnostics?: Diagnostics
+  get diagnostics(): Diagnostics {
+    return (this._diagnostics ??= new Diagnostics({ client: this.client }))
   }
 
   private _command?: Command

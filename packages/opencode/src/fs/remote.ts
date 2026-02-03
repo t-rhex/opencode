@@ -4,6 +4,22 @@ import { homedir } from "os"
 import { join } from "path"
 import type { IFilesystem, FileStat, ExecResult, ExecOptions } from "./interface"
 
+export type ConnectionStatus = "connected" | "disconnected" | "connecting" | "reconnecting" | "error"
+
+export interface ConnectionState {
+  status: ConnectionStatus
+  host: string
+  port: number
+  lastConnected?: Date
+  lastError?: string
+  reconnectAttempt: number
+  nextRetryAt?: Date
+}
+
+export interface ConnectionCallbacks {
+  onStateChange?: (state: ConnectionState) => void
+}
+
 export interface RemoteFilesystemOptions {
   host: string
   username: string
@@ -23,12 +39,21 @@ export class RemoteFilesystem implements IFilesystem {
   private options: RemoteFilesystemOptions
   private config: ConnectConfig
   private connecting: Promise<void> | null = null
-  private reconnectAttempts = 0
-  private maxReconnectAttempts = 5
+  private state: ConnectionState
+  private callbacks: ConnectionCallbacks
+  private healthCheckTimer: ReturnType<typeof setInterval> | null = null
+  private reconnecting: Promise<void> | null = null
 
-  constructor(options: RemoteFilesystemOptions) {
+  constructor(options: RemoteFilesystemOptions, callbacks?: ConnectionCallbacks) {
     this.options = options
     this.config = this.buildConfig(options)
+    this.callbacks = callbacks ?? {}
+    this.state = {
+      status: "disconnected",
+      host: options.host,
+      port: options.port ?? 22,
+      reconnectAttempt: 0,
+    }
   }
 
   private buildConfig(opts: RemoteFilesystemOptions): ConnectConfig {
@@ -57,21 +82,142 @@ export class RemoteFilesystem implements IFilesystem {
     return config
   }
 
+  private calculateRetryDelay(attempt: number): number {
+    const base = 1000
+    const max = 30000
+    const factor = 2
+    const exponential = Math.min(base * Math.pow(factor, attempt - 1), max)
+    const jitter = exponential * 0.25 * Math.random()
+    return Math.floor(exponential + jitter)
+  }
+
+  private updateState(partial: Partial<ConnectionState>) {
+    this.state = { ...this.state, ...partial }
+    this.callbacks.onStateChange?.(this.state)
+  }
+
+  getConnectionState(): ConnectionState {
+    return { ...this.state }
+  }
+
+  private startHealthCheck() {
+    this.stopHealthCheck()
+    this.healthCheckTimer = setInterval(async () => {
+      if (this.state.status !== "connected") return
+      try {
+        await this.exec("echo 1", { timeout: 5000 })
+      } catch {
+        this.handleDisconnection("Health check failed")
+      }
+    }, 30000)
+  }
+
+  private stopHealthCheck() {
+    if (this.healthCheckTimer) {
+      clearInterval(this.healthCheckTimer)
+      this.healthCheckTimer = null
+    }
+  }
+
+  private async handleDisconnection(reason: string) {
+    if (this.state.status === "reconnecting" || this.reconnecting) return
+
+    this.stopHealthCheck()
+    this.client = null
+    this.sftp = null
+
+    this.updateState({
+      status: "reconnecting",
+      lastError: reason,
+      reconnectAttempt: 0,
+    })
+
+    this.reconnecting = this.attemptReconnection()
+    await this.reconnecting
+    this.reconnecting = null
+  }
+
+  private async attemptReconnection() {
+    const maxAttempts = 10
+
+    while (this.state.reconnectAttempt < maxAttempts) {
+      const attempt = this.state.reconnectAttempt + 1
+      const delay = this.calculateRetryDelay(attempt)
+
+      this.updateState({
+        reconnectAttempt: attempt,
+        nextRetryAt: new Date(Date.now() + delay),
+      })
+
+      await new Promise((resolve) => setTimeout(resolve, delay))
+
+      try {
+        this.updateState({ status: "connecting" })
+        await this.connectInternal()
+        this.updateState({
+          status: "connected",
+          reconnectAttempt: 0,
+          lastConnected: new Date(),
+          nextRetryAt: undefined,
+        })
+        this.startHealthCheck()
+        return
+      } catch (error) {
+        this.updateState({
+          status: "reconnecting",
+          lastError: error instanceof Error ? error.message : String(error),
+        })
+      }
+    }
+
+    this.updateState({ status: "error" })
+    throw new Error(`Failed to reconnect after ${maxAttempts} attempts`)
+  }
+
   async connect(): Promise<void> {
-    if (this.client && this.isConnected()) return
+    if (this.state.status === "connected") return
     if (this.connecting) return this.connecting
+
+    this.updateState({ status: "connecting" })
+
+    try {
+      await this.connectInternal()
+      this.updateState({
+        status: "connected",
+        lastConnected: new Date(),
+        reconnectAttempt: 0,
+      })
+      this.startHealthCheck()
+    } catch (error) {
+      this.updateState({
+        status: "error",
+        lastError: error instanceof Error ? error.message : String(error),
+      })
+      throw error
+    }
+  }
+
+  private connectInternal(): Promise<void> {
+    const connectionTimeout = 30000
 
     this.connecting = new Promise((resolve, reject) => {
       const client = new Client()
 
+      const timer = setTimeout(() => {
+        client.end()
+        this.connecting = null
+        reject(new Error(`SSH connection timed out after ${connectionTimeout / 1000}s`))
+      }, connectionTimeout)
+
       client.on("ready", () => {
+        clearTimeout(timer)
         this.client = client
-        this.reconnectAttempts = 0
         this.connecting = null
         resolve()
       })
 
       client.on("error", (err) => {
+        clearTimeout(timer)
         this.connecting = null
         reject(err)
       })
@@ -88,6 +234,7 @@ export class RemoteFilesystem implements IFilesystem {
   }
 
   async disconnect(): Promise<void> {
+    this.stopHealthCheck()
     if (this.sftp) {
       this.sftp.end()
       this.sftp = null
@@ -97,6 +244,8 @@ export class RemoteFilesystem implements IFilesystem {
       this.client = null
     }
     this.connecting = null
+    this.reconnecting = null
+    this.updateState({ status: "disconnected" })
   }
 
   isConnected(): boolean {
@@ -104,9 +253,19 @@ export class RemoteFilesystem implements IFilesystem {
   }
 
   private async ensureConnected(): Promise<Client> {
-    if (!this.client || !this.isConnected()) {
-      await this.connect()
+    if (this.state.status === "reconnecting" && this.reconnecting) {
+      await this.reconnecting
     }
+
+    if (!this.client || !this.isConnected()) {
+      if (this.state.status !== "reconnecting") {
+        await this.handleDisconnection("Connection lost")
+      }
+      if (this.reconnecting) {
+        await this.reconnecting
+      }
+    }
+
     if (!this.client) throw new Error("SSH connection failed")
     return this.client
   }
@@ -115,8 +274,15 @@ export class RemoteFilesystem implements IFilesystem {
     if (this.sftp) return this.sftp
 
     const client = await this.ensureConnected()
+    const sftpTimeout = 30000
+
     return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error(`SFTP subsystem request timed out after ${sftpTimeout / 1000}s`))
+      }, sftpTimeout)
+
       client.sftp((err, sftp) => {
+        clearTimeout(timer)
         if (err) reject(err)
         else {
           this.sftp = sftp
@@ -274,17 +440,25 @@ export class RemoteFilesystem implements IFilesystem {
 
     return new Promise((resolve, reject) => {
       let timedOut = false
+      let stream: ReturnType<Client["exec"]> extends void
+        ? never
+        : Parameters<Parameters<Client["exec"]>[1]>[1] | null = null
       const timer = setTimeout(() => {
         timedOut = true
+        if (stream) {
+          stream.signal("KILL")
+          stream.close()
+        }
       }, timeout)
 
-      client.exec(fullCommand, (err, stream) => {
+      client.exec(fullCommand, (err, s) => {
         if (err) {
           clearTimeout(timer)
           reject(err)
           return
         }
 
+        stream = s
         let stdout = ""
         let stderr = ""
 
@@ -322,17 +496,25 @@ export class RemoteFilesystem implements IFilesystem {
 
     return new Promise((resolve, reject) => {
       let timedOut = false
+      let stream: ReturnType<Client["exec"]> extends void
+        ? never
+        : Parameters<Parameters<Client["exec"]>[1]>[1] | null = null
       const timer = setTimeout(() => {
         timedOut = true
+        if (stream) {
+          stream.signal("KILL")
+          stream.close()
+        }
       }, timeout)
 
-      client.exec(fullCommand, (err, stream) => {
+      client.exec(fullCommand, (err, s) => {
         if (err) {
           clearTimeout(timer)
           reject(err)
           return
         }
 
+        stream = s
         let stdout = ""
         let stderr = ""
 
@@ -361,7 +543,8 @@ export class RemoteFilesystem implements IFilesystem {
   }
 
   async glob(pattern: string, cwd: string): Promise<string[]> {
-    const result = await this.exec(`ls -1 ${pattern} 2>/dev/null || true`, { cwd })
+    const escaped = pattern.replace(/"/g, '\\"')
+    const result = await this.exec(`find . -path "./${escaped}" -type f 2>/dev/null | sed 's|^\\./||' || true`, { cwd })
     return result.stdout
       .trim()
       .split("\n")
@@ -371,5 +554,19 @@ export class RemoteFilesystem implements IFilesystem {
   async realpath(remotePath: string): Promise<string> {
     const result = await this.exec(`realpath "${remotePath}"`)
     return result.stdout.trim()
+  }
+
+  /**
+   * Create a PTY session on the remote server
+   */
+  async createPty(options?: {
+    rows?: number
+    cols?: number
+    cwd?: string
+    env?: Record<string, string>
+  }): Promise<import("../pty/remote-pty").IRemotePty> {
+    const { RemotePty } = await import("../pty/remote-pty")
+    const client = await this.ensureConnected()
+    return RemotePty.create(client, options)
   }
 }

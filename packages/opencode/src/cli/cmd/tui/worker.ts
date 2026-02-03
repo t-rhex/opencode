@@ -10,7 +10,8 @@ import { GlobalBus } from "@/bus/global"
 import { createOpencodeClient, type Event } from "@opencode-ai/sdk/v2"
 import type { BunWebSocketData } from "hono/bun"
 import { Flag } from "@/flag/flag"
-import { CurrentFilesystem, RemoteFilesystem } from "@/fs"
+import { CurrentFilesystem, RemoteFilesystem, RemoteEvent } from "@/fs"
+import { Bus } from "@/bus"
 
 export interface RemoteConfig {
   host: string
@@ -142,12 +143,21 @@ export const rpc = {
     CurrentFilesystem.setRemoteMode(true, config.remoteDir)
     Instance.clearCache()
 
-    const fs = new RemoteFilesystem({
-      host: config.host,
-      username: config.username,
-      port: config.port,
-      privateKeyPath: config.privateKeyPath,
-    })
+    const fs = new RemoteFilesystem(
+      {
+        host: config.host,
+        username: config.username,
+        port: config.port,
+        privateKeyPath: config.privateKeyPath,
+      },
+      {
+        onStateChange: (state) => {
+          Bus.publish(RemoteEvent.StateChanged, state)
+          Rpc.emit("remote.stateChanged", state)
+        },
+      },
+    )
+
     await fs.connect()
 
     if (config.remoteDir) {
@@ -182,6 +192,11 @@ export const rpc = {
   async reload() {
     Config.global.reset()
     await Instance.disposeAll()
+  },
+  getConnectionState() {
+    if (!CurrentFilesystem.isRemote()) return null
+    const fs = CurrentFilesystem.get() as RemoteFilesystem
+    return fs.getConnectionState()
   },
   async shutdown() {
     Log.Default.info("worker shutting down")

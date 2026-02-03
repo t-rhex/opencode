@@ -1,8 +1,7 @@
 import z from "zod"
 import * as path from "path"
-import * as fs from "fs/promises"
-import { readFileSync } from "fs"
 import { Log } from "../util/log"
+import { CurrentFilesystem, type IFilesystem } from "../fs"
 
 export namespace Patch {
   const log = Log.create({ service: "patch" })
@@ -308,11 +307,16 @@ export namespace Patch {
     content: string
   }
 
-  export function deriveNewContentsFromChunks(filePath: string, chunks: UpdateFileChunk[]): ApplyPatchFileUpdate {
+  export async function deriveNewContentsFromChunks(
+    filePath: string,
+    chunks: UpdateFileChunk[],
+    fs?: IFilesystem,
+  ): Promise<ApplyPatchFileUpdate> {
     // Read original file content
+    const filesystem = fs ?? CurrentFilesystem.get()
     let originalContent: string
     try {
-      originalContent = readFileSync(filePath, "utf-8")
+      originalContent = await filesystem.read(filePath)
     } catch (error) {
       throw new Error(`Failed to read file ${filePath}: ${error}`)
     }
@@ -515,11 +519,12 @@ export namespace Patch {
   }
 
   // Apply hunks to filesystem
-  export async function applyHunksToFiles(hunks: Hunk[]): Promise<AffectedPaths> {
+  export async function applyHunksToFiles(hunks: Hunk[], filesystem?: IFilesystem): Promise<AffectedPaths> {
     if (hunks.length === 0) {
       throw new Error("No files were modified.")
     }
 
+    const fs = filesystem ?? CurrentFilesystem.get()
     const added: string[] = []
     const modified: string[] = []
     const deleted: string[] = []
@@ -530,10 +535,10 @@ export namespace Patch {
           // Create parent directories
           const addDir = path.dirname(hunk.path)
           if (addDir !== "." && addDir !== "/") {
-            await fs.mkdir(addDir, { recursive: true })
+            await fs.mkdir(addDir, true)
           }
 
-          await fs.writeFile(hunk.path, hunk.contents, "utf-8")
+          await fs.write(hunk.path, hunk.contents)
           added.push(hunk.path)
           log.info(`Added file: ${hunk.path}`)
           break
@@ -545,22 +550,22 @@ export namespace Patch {
           break
 
         case "update":
-          const fileUpdate = deriveNewContentsFromChunks(hunk.path, hunk.chunks)
+          const fileUpdate = await deriveNewContentsFromChunks(hunk.path, hunk.chunks, fs)
 
           if (hunk.move_path) {
             // Handle file move
             const moveDir = path.dirname(hunk.move_path)
             if (moveDir !== "." && moveDir !== "/") {
-              await fs.mkdir(moveDir, { recursive: true })
+              await fs.mkdir(moveDir, true)
             }
 
-            await fs.writeFile(hunk.move_path, fileUpdate.content, "utf-8")
+            await fs.write(hunk.move_path, fileUpdate.content)
             await fs.unlink(hunk.path)
             modified.push(hunk.move_path)
             log.info(`Moved file: ${hunk.path} -> ${hunk.move_path}`)
           } else {
             // Regular update
-            await fs.writeFile(hunk.path, fileUpdate.content, "utf-8")
+            await fs.write(hunk.path, fileUpdate.content)
             modified.push(hunk.path)
             log.info(`Updated file: ${hunk.path}`)
           }
@@ -624,8 +629,9 @@ export namespace Patch {
             case "delete":
               // For delete, we need to read the current content
               const deletePath = path.resolve(effectiveCwd, hunk.path)
+              const filesystem = CurrentFilesystem.get()
               try {
-                const content = await fs.readFile(deletePath, "utf-8")
+                const content = await filesystem.read(deletePath)
                 changes.set(resolvedPath, {
                   type: "delete",
                   content,
@@ -641,7 +647,7 @@ export namespace Patch {
             case "update":
               const updatePath = path.resolve(effectiveCwd, hunk.path)
               try {
-                const fileUpdate = deriveNewContentsFromChunks(updatePath, hunk.chunks)
+                const fileUpdate = await deriveNewContentsFromChunks(updatePath, hunk.chunks)
                 changes.set(resolvedPath, {
                   type: "update",
                   unified_diff: fileUpdate.unified_diff,

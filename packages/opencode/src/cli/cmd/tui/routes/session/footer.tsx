@@ -6,6 +6,48 @@ import { useConnected } from "../../component/dialog-model"
 import { createStore } from "solid-js/store"
 import { useRoute } from "../../context/route"
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)}K`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)}G`
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)}T`
+}
+
+function DiagnosticsDisplay() {
+  const sync = useSync()
+  const { theme } = useTheme()
+
+  const diagnostics = createMemo(() => sync.data.diagnostics)
+  const isRemote = createMemo(() => sync.data.path.remote)
+
+  // Only show for remote connections with data
+  if (!isRemote()) return null
+
+  return (
+    <Show when={diagnostics()}>
+      <text fg={theme.textMuted}>
+        <Show when={diagnostics()!.disk}>
+          <span style={{ fg: diagnostics()!.disk!.percent > 90 ? theme.error : theme.textMuted }}>
+            disk:{diagnostics()!.disk!.percent}%
+          </span>
+        </Show>
+        <Show when={diagnostics()!.memory}>
+          {" "}
+          <span style={{ fg: diagnostics()!.memory!.percent > 90 ? theme.error : theme.textMuted }}>
+            mem:{formatBytes(diagnostics()!.memory!.used)}
+          </span>
+        </Show>
+        <Show when={diagnostics()!.load !== undefined}>
+          {" "}
+          <span style={{ fg: diagnostics()!.load! > 4 ? theme.warning : theme.textMuted }}>
+            load:{diagnostics()!.load!.toFixed(1)}
+          </span>
+        </Show>
+      </text>
+    </Show>
+  )
+}
+
 export function Footer() {
   const { theme } = useTheme()
   const sync = useSync()
@@ -83,6 +125,7 @@ export function Footer() {
               </text>
             </Show>
             <text fg={theme.textMuted}>/status</text>
+            <DiagnosticsDisplay />
           </Match>
         </Switch>
       </box>

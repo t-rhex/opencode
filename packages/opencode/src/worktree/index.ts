@@ -12,6 +12,7 @@ import { fn } from "../util/fn"
 import { Log } from "../util/log"
 import { BusEvent } from "@/bus/bus-event"
 import { GlobalBus } from "@/bus/global"
+import { CurrentFilesystem } from "../fs"
 
 export namespace Worktree {
   const log = Log.create({ service: "worktree" })
@@ -115,6 +116,13 @@ export namespace Worktree {
 
   export const ResetFailedError = NamedError.create(
     "WorktreeResetFailedError",
+    z.object({
+      message: z.string(),
+    }),
+  )
+
+  export const RemoteModeError = NamedError.create(
+    "WorktreeRemoteModeError",
     z.object({
       message: z.string(),
     }),
@@ -285,6 +293,11 @@ export namespace Worktree {
   }
 
   export const create = fn(CreateInput.optional(), async (input) => {
+    if (CurrentFilesystem.isRemote()) {
+      log.warn("worktree creation disabled in remote mode")
+      throw new RemoteModeError({ message: "Worktrees are not supported in remote mode" })
+    }
+
     if (Instance.project.vcs !== "git") {
       throw new NotGitError({ message: "Worktrees are only supported for git projects" })
     }
@@ -370,6 +383,11 @@ export namespace Worktree {
   })
 
   export const remove = fn(RemoveInput, async (input) => {
+    if (CurrentFilesystem.isRemote()) {
+      log.warn("worktree removal disabled in remote mode")
+      throw new RemoteModeError({ message: "Worktrees are not supported in remote mode" })
+    }
+
     if (Instance.project.vcs !== "git") {
       throw new NotGitError({ message: "Worktrees are only supported for git projects" })
     }
@@ -419,6 +437,11 @@ export namespace Worktree {
   })
 
   export const reset = fn(ResetInput, async (input) => {
+    if (CurrentFilesystem.isRemote()) {
+      log.warn("worktree reset disabled in remote mode")
+      throw new RemoteModeError({ message: "Worktrees are not supported in remote mode" })
+    }
+
     if (Instance.project.vcs !== "git") {
       throw new NotGitError({ message: "Worktrees are only supported for git projects" })
     }

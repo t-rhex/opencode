@@ -20,6 +20,7 @@ import {
   printParseErrorCode,
 } from "jsonc-parser"
 import { Instance } from "../project/instance"
+import { CurrentFilesystem } from "../fs"
 import { LSPServer } from "../lsp/server"
 import { BunProc } from "@/bun"
 import { Installation } from "@/installation"
@@ -116,7 +117,7 @@ export namespace Config {
 
     const directories = [
       Global.Path.config,
-      // Only scan project .opencode/ directories when project discovery is enabled
+      // Scan project .opencode/ directories when project discovery is enabled
       ...(!Flag.OPENCODE_DISABLE_PROJECT_CONFIG
         ? await Array.fromAsync(
             Filesystem.up({
@@ -1097,6 +1098,25 @@ export namespace Config {
             .describe("Timeout in milliseconds for model context protocol (MCP) requests"),
         })
         .optional(),
+      remote: z
+        .object({
+          profiles: z
+            .record(
+              z.string(),
+              z.object({
+                host: z.string().describe("SSH host or IP address"),
+                username: z.string().optional().describe("SSH username"),
+                port: z.number().optional().describe("SSH port (default: 22)"),
+                identity: z.string().optional().describe("Path to SSH private key"),
+                remoteDir: z.string().optional().describe("Working directory on remote server"),
+              }),
+            )
+            .optional()
+            .describe("Named connection profiles for remote development"),
+          default: z.string().optional().describe("Default profile to use when --remote flag has no value"),
+        })
+        .optional()
+        .describe("Remote SSH development configuration"),
     })
     .strict()
     .meta({
@@ -1136,12 +1156,11 @@ export namespace Config {
 
   async function loadFile(filepath: string): Promise<Info> {
     log.info("loading", { path: filepath })
-    let text = await Bun.file(filepath)
-      .text()
-      .catch((err) => {
-        if (err.code === "ENOENT") return
-        throw new JsonError({ path: filepath }, { cause: err })
-      })
+    const fs = CurrentFilesystem.get()
+    let text = await fs.read(filepath).catch((err) => {
+      if (err.code === "ENOENT") return
+      throw new JsonError({ path: filepath }, { cause: err })
+    })
     if (!text) return {}
     return load(text, filepath)
   }

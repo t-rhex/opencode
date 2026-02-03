@@ -611,6 +611,15 @@ export type EventVcsBranchUpdated = {
   }
 }
 
+export type EventVcsUpdated = {
+  type: "vcs.updated"
+  properties: {
+    branch?: string
+    staged: number
+    unstaged: number
+  }
+}
+
 export type EventTuiPromptAppend = {
   type: "tui.prompt.append"
   properties: {
@@ -726,6 +735,7 @@ export type Event =
   | EventSessionError
   | EventFileWatcherUpdated
   | EventVcsBranchUpdated
+  | EventVcsUpdated
   | EventTuiPromptAppend
   | EventTuiCommandExecute
   | EventTuiToastShow
@@ -1398,8 +1408,24 @@ export type Path = {
 }
 
 export type VcsInfo = {
-  branch: string
+  branch?: string
+  staged: number
+  unstaged: number
 }
+
+export type Diagnostics = {
+  disk?: {
+    used: number
+    total: number
+    percent: number
+  }
+  memory?: {
+    used: number
+    total: number
+    percent: number
+  }
+  load?: number
+} | null
 
 export type TextPartInput = {
   id?: string

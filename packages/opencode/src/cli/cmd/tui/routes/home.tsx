@@ -14,9 +14,126 @@ import { usePromptRef } from "../context/prompt"
 import { Installation } from "@/installation"
 import { useKV } from "../context/kv"
 import { useCommandDialog } from "../component/dialog-command"
+import { useRemote } from "../context/remote"
 
 // TODO: what is the best way to do this?
 let once = false
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)}K`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)}G`
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)}T`
+}
+
+const HomeDiagnosticsDisplay = () => {
+  const sync = useSync()
+  const { theme } = useTheme()
+
+  const diagnostics = createMemo(() => sync.data.diagnostics)
+
+  return (
+    <Show when={diagnostics()}>
+      <text fg={theme.textMuted}>
+        <Show when={diagnostics()!.disk}>
+          <span style={{ fg: diagnostics()!.disk!.percent > 90 ? theme.error : theme.textMuted }}>
+            disk:{diagnostics()!.disk!.percent}%
+          </span>
+        </Show>
+        <Show when={diagnostics()!.memory}>
+          {" "}
+          <span style={{ fg: diagnostics()!.memory!.percent > 90 ? theme.error : theme.textMuted }}>
+            mem:{formatBytes(diagnostics()!.memory!.used)}
+          </span>
+        </Show>
+      </text>
+    </Show>
+  )
+}
+
+const HomeGitStatus = () => {
+  const sync = useSync()
+  const { theme } = useTheme()
+
+  const vcs = createMemo(() => sync.data.vcs)
+
+  return (
+    <Show when={vcs()?.branch}>
+      <text fg={theme.textMuted}>
+        {vcs()?.branch}
+        <Show when={vcs()!.staged > 0}>
+          <span style={{ fg: theme.success }}> +{vcs()!.staged}</span>
+        </Show>
+        <Show when={vcs()!.unstaged > 0}>
+          <span style={{ fg: theme.warning }}> ~{vcs()!.unstaged}</span>
+        </Show>
+      </text>
+    </Show>
+  )
+}
+
+const HomeConnectionStatus = () => {
+  const sync = useSync()
+  const remote = useRemote()
+  const args = useArgs()
+  const { theme } = useTheme()
+
+  // If not remote, don't show anything
+  if (!sync.data.path.remote) return null
+
+  const state = remote.state
+  const host = createMemo(() => {
+    if (args.remote) {
+      const r = args.remote
+      const port = r.port !== 22 ? `:${r.port}` : ""
+      return `${r.username}@${r.host}${port}`
+    }
+    return state?.host ?? "remote"
+  })
+
+  // No state yet means we're connected (initial state before any changes)
+  if (!state) {
+    return (
+      <box flexDirection="row" gap={1}>
+        <HomeGitStatus />
+        <HomeDiagnosticsDisplay />
+        <text fg={theme.success}>SSH: {host()}</text>
+      </box>
+    )
+  }
+
+  const retryCountdown = createMemo(() => {
+    if (state.status !== "reconnecting" || !state.nextRetryAt) return 0
+    return Math.max(0, Math.ceil((state.nextRetryAt.getTime() - Date.now()) / 1000))
+  })
+
+  return (
+    <box flexDirection="row" gap={1}>
+      <HomeGitStatus />
+      <HomeDiagnosticsDisplay />
+      <Switch fallback={null}>
+        <Match when={state.status === "connected"}>
+          <text fg={theme.success}>SSH: {host()}</text>
+        </Match>
+        <Match when={state.status === "connecting"}>
+          <text fg={theme.warning}>SSH: connecting...</text>
+        </Match>
+        <Match when={state.status === "reconnecting"}>
+          <text fg={theme.warning}>
+            SSH: reconnecting ({state.reconnectAttempt}/10)
+            {retryCountdown() > 0 ? ` ${retryCountdown()}s` : ""}
+          </text>
+        </Match>
+        <Match when={state.status === "error"}>
+          <text fg={theme.error}>SSH: disconnected</text>
+        </Match>
+        <Match when={state.status === "disconnected"}>
+          <text fg={theme.textMuted}>SSH: disconnected</text>
+        </Match>
+      </Switch>
+    </box>
+  )
+}
 
 export function Home() {
   const sync = useSync()
@@ -132,7 +249,17 @@ export function Home() {
         </box>
         <box flexGrow={1} />
         <box flexShrink={0}>
-          <text fg={theme.textMuted}>{Installation.VERSION}</text>
+          <Switch>
+            <Match when={sync.data.path.remote}>
+              <HomeConnectionStatus />
+            </Match>
+            <Match when={sync.data.vcs?.branch}>
+              <HomeGitStatus />
+            </Match>
+            <Match when={true}>
+              <text fg={theme.textMuted}>{Installation.VERSION}</text>
+            </Match>
+          </Switch>
         </box>
       </box>
     </>

@@ -18,6 +18,7 @@ import type {
   ProviderAuthMethod,
   VcsInfo,
   AppSkillsResponse,
+  Diagnostics,
 } from "@opencode-ai/sdk/v2"
 import { createStore, produce, reconcile } from "solid-js/store"
 import { useSDK } from "@tui/context/sdk"
@@ -74,6 +75,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       }
       formatter: FormatterStatus[]
       vcs: VcsInfo | undefined
+      diagnostics: Diagnostics
       path: Path
     }>({
       provider_next: {
@@ -102,6 +104,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       mcp_resource: {},
       formatter: [],
       vcs: undefined,
+      diagnostics: null,
       path: { home: "", state: "", config: "", worktree: "", directory: "", remote: false },
     })
 
@@ -321,8 +324,17 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
           break
         }
 
+        case "vcs.updated": {
+          setStore("vcs", {
+            branch: event.properties.branch,
+            staged: event.properties.staged,
+            unstaged: event.properties.unstaged,
+          })
+          break
+        }
         case "vcs.branch.updated": {
-          setStore("vcs", { branch: event.properties.branch })
+          // Legacy event - update branch only, keep other fields
+          setStore("vcs", "branch", event.properties.branch)
           break
         }
       }
@@ -399,8 +411,17 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
             sdk.client.provider.auth().then((x) => setStore("provider_auth", reconcile(x.data ?? {}))),
             sdk.client.vcs.get().then((x) => setStore("vcs", reconcile(x.data))),
             sdk.client.path.get().then((x) => setStore("path", reconcile(x.data!))),
+            sdk.client.diagnostics.get().then((x) => setStore("diagnostics", x.data ?? null)),
           ]).then(() => {
             setStore("status", "complete")
+            // Start polling diagnostics every 60s for remote connections
+            if (store.path.remote) {
+              const pollDiagnostics = setInterval(() => {
+                sdk.client.diagnostics.get().then((x) => setStore("diagnostics", x.data ?? null))
+              }, 60000)
+              // Note: This interval will be cleaned up when the component unmounts
+              // TODO: Consider moving to a dedicated cleanup mechanism
+            }
           })
         })
         .catch(async (e) => {

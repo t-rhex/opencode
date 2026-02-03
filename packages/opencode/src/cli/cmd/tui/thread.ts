@@ -8,7 +8,10 @@ import { iife } from "@/util/iife"
 import { Log } from "@/util/log"
 import { withNetworkOptions, resolveNetworkOptions } from "@/cli/network"
 import type { Event } from "@opencode-ai/sdk/v2"
-import type { EventSource } from "./context/sdk"
+import type { EventSource, RemoteStateSource } from "./context/sdk"
+import { SSHConfig } from "../../../util/ssh-config"
+import type { ConnectionState } from "@/fs"
+import { Config } from "@/config/config"
 
 declare global {
   const OPENCODE_WORKER_PATH: string
@@ -40,16 +43,98 @@ function createEventSource(client: RpcClient): EventSource {
   }
 }
 
-function parseRemoteTarget(target: string, identity?: string, remoteDir?: string): RemoteConfig {
-  const match = target.match(/^([^@]+)@([^:]+)(?::(\d+))?$/)
-  if (!match) throw new Error(`Invalid remote target format: ${target}. Expected: user@host or user@host:port`)
-  const [, username, host, portStr] = match
+function createRemoteStateSource(client: RpcClient): RemoteStateSource {
   return {
-    host,
-    username,
-    port: portStr ? parseInt(portStr, 10) : 22,
-    privateKeyPath: identity,
-    remoteDir,
+    on: (handler) => client.on<ConnectionState>("remote.stateChanged", handler),
+  }
+}
+
+interface ParsedRemoteConfig {
+  host: string
+  username?: string
+  port?: number
+  privateKeyPath?: string
+  remoteDir?: string
+}
+
+function parseRemoteTarget(
+  target: string,
+  options: {
+    port?: number
+    identity?: string
+    remoteDir?: string
+  },
+): ParsedRemoteConfig {
+  // Try to parse as user@host:port
+  const fullMatch = target.match(/^([^@]+)@([^:]+):(\d+)$/)
+  if (fullMatch) {
+    const [, username, host, portStr] = fullMatch
+    return {
+      host,
+      username,
+      port: options.port ?? parseInt(portStr, 10),
+      privateKeyPath: options.identity,
+      remoteDir: options.remoteDir,
+    }
+  }
+
+  // Try to parse as user@host
+  const userHostMatch = target.match(/^([^@]+)@([^:]+)$/)
+  if (userHostMatch) {
+    const [, username, host] = userHostMatch
+    return {
+      host,
+      username,
+      port: options.port,
+      privateKeyPath: options.identity,
+      remoteDir: options.remoteDir,
+    }
+  }
+
+  // Just hostname/alias (user comes from SSH config)
+  return {
+    host: target,
+    port: options.port,
+    privateKeyPath: options.identity,
+    remoteDir: options.remoteDir,
+  }
+}
+
+async function resolveRemoteConfig(
+  target: string,
+  options: {
+    port?: number
+    identity?: string
+    remoteDir?: string
+  },
+): Promise<RemoteConfig> {
+  // Check if target matches a profile name in config
+  const config = await Config.global()
+  const profile = config.remote?.profiles?.[target]
+
+  if (profile) {
+    // Use profile settings, CLI options override profile
+    const sshConfig = SSHConfig.resolve(profile.host)
+    return {
+      host: sshConfig.hostname ?? profile.host,
+      username: profile.username ?? sshConfig.user ?? process.env.USER ?? "root",
+      port: options.port ?? profile.port ?? sshConfig.port ?? 22,
+      privateKeyPath: options.identity ?? profile.identity ?? sshConfig.identityFile,
+      remoteDir: options.remoteDir ?? profile.remoteDir,
+    }
+  }
+
+  // Otherwise parse as user@host:port format
+  const parsed = parseRemoteTarget(target, options)
+  const sshConfig = SSHConfig.resolve(parsed.host)
+
+  // Merge with priority: CLI flags > parsed target > SSH config > defaults
+  return {
+    host: sshConfig.hostname ?? parsed.host,
+    username: parsed.username ?? sshConfig.user ?? process.env.USER ?? "root",
+    port: options.port ?? parsed.port ?? sshConfig.port ?? 22,
+    privateKeyPath: options.identity ?? parsed.privateKeyPath ?? sshConfig.identityFile,
+    remoteDir: options.remoteDir ?? parsed.remoteDir,
   }
 }
 
@@ -94,6 +179,11 @@ export const TuiThreadCommand = cmd({
         alias: ["i"],
         describe: "path to SSH private key for remote connection",
       })
+      .option("ssh-port", {
+        type: "number",
+        alias: ["p"],
+        describe: "SSH port for remote connection (default: 22)",
+      })
       .option("remote-dir", {
         type: "string",
         describe: "working directory on remote server (defaults to home directory)",
@@ -110,9 +200,14 @@ export const TuiThreadCommand = cmd({
     })
 
     const isRemote = !!args.remote
-    const cwd = isRemote
-      ? (args["remote-dir"] ?? `/home/${parseRemoteTarget(args.remote!, args.identity, args["remote-dir"]).username}`)
-      : localCwd
+    const remoteConfig = isRemote
+      ? await resolveRemoteConfig(args.remote!, {
+          port: args["ssh-port"],
+          identity: args.identity,
+          remoteDir: args["remote-dir"],
+        })
+      : undefined
+    const cwd = isRemote ? (remoteConfig!.remoteDir ?? `/home/${remoteConfig!.username}`) : localCwd
 
     if (!isRemote) {
       try {
@@ -145,11 +240,27 @@ export const TuiThreadCommand = cmd({
       await client.call("reload", undefined)
     })
 
-    if (args.remote) {
-      const remoteConfig = parseRemoteTarget(args.remote, args.identity, args["remote-dir"])
-      UI.println(`Connecting to remote: ${remoteConfig.username}@${remoteConfig.host}:${remoteConfig.port}...`)
+    let remoteState: RemoteStateSource | undefined
+    if (remoteConfig) {
+      const config = { ...remoteConfig, remoteDir: cwd }
+      UI.println(`Connecting to remote: ${config.username}@${config.host}:${config.port}...`)
+
+      // Create remote state source for TUI
+      remoteState = createRemoteStateSource(client)
+
+      // Listen for connection state changes (for logging)
+      client.on<ConnectionState>("remote.stateChanged", (state) => {
+        if (state.status === "reconnecting") {
+          Log.Default.info(`Reconnecting to ${state.host}... (attempt ${state.reconnectAttempt})`)
+        } else if (state.status === "connected" && state.reconnectAttempt > 0) {
+          Log.Default.info(`Reconnected to ${state.host}`)
+        } else if (state.status === "error") {
+          Log.Default.error(`Connection failed: ${state.lastError}`)
+        }
+      })
+
       try {
-        await client.call("initRemote", remoteConfig)
+        await client.call("initRemote", config)
         UI.println("Connected to remote server")
       } catch (e) {
         UI.error(`Failed to connect to remote: ${e instanceof Error ? e.message : e}`)
@@ -192,12 +303,16 @@ export const TuiThreadCommand = cmd({
       url,
       fetch: customFetch,
       events,
+      remoteState,
       args: {
         continue: args.continue,
         sessionID: args.session,
         agent: args.agent,
         model: args.model,
         prompt,
+        remote: remoteConfig
+          ? { host: remoteConfig.host, username: remoteConfig.username, port: remoteConfig.port }
+          : undefined,
       },
       onExit: async () => {
         await client.call("shutdown", undefined)

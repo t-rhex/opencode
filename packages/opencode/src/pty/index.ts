@@ -8,6 +8,9 @@ import type { WSContext } from "hono/ws"
 import { Instance } from "../project/instance"
 import { lazy } from "@opencode-ai/util/lazy"
 import { Shell } from "@/shell/shell"
+import { CurrentFilesystem } from "@/fs"
+import { RemoteFilesystem } from "@/fs/remote"
+import type { IRemotePty } from "./remote-pty"
 
 export namespace Pty {
   const log = Log.create({ service: "pty" })
@@ -63,9 +66,12 @@ export namespace Pty {
     Deleted: BusEvent.define("pty.deleted", z.object({ id: Identifier.schema("pty") })),
   }
 
+  // Union type for both local and remote PTY processes
+  type PtyProcess = IPty | IRemotePty
+
   interface ActiveSession {
     info: Info
-    process: IPty
+    process: PtyProcess
     buffer: string
     subscribers: Set<WSContext>
   }
@@ -95,33 +101,62 @@ export namespace Pty {
 
   export async function create(input: CreateInput) {
     const id = Identifier.create("pty", false)
-    const command = input.command || Shell.preferred()
-    const args = input.args || []
-    if (command.endsWith("sh")) {
-      args.push("-l")
-    }
-
+    const isRemote = CurrentFilesystem.isRemote()
     const cwd = input.cwd || Instance.directory
-    const env = {
-      ...process.env,
-      ...input.env,
-      TERM: "xterm-256color",
-      OPENCODE_TERMINAL: "1",
-    } as Record<string, string>
 
-    if (process.platform === "win32") {
-      env.LC_ALL = "C.UTF-8"
-      env.LC_CTYPE = "C.UTF-8"
-      env.LANG = "C.UTF-8"
+    let ptyProcess: PtyProcess
+    let command: string
+    let args: string[]
+    let pid: number
+
+    if (isRemote) {
+      // Remote mode: use SSH shell
+      const fs = CurrentFilesystem.get() as RemoteFilesystem
+      log.info("creating remote session", { id, cwd })
+
+      const remotePty = await fs.createPty({
+        cwd,
+        env: input.env,
+        rows: 24,
+        cols: 80,
+      })
+
+      ptyProcess = remotePty
+      command = "ssh-shell"
+      args = []
+      pid = remotePty.pid
+    } else {
+      // Local mode: use bun-pty
+      command = input.command || Shell.preferred()
+      args = input.args || []
+      if (command.endsWith("sh")) {
+        args.push("-l")
+      }
+
+      const env = {
+        ...process.env,
+        ...input.env,
+        TERM: "xterm-256color",
+        OPENCODE_TERMINAL: "1",
+      } as Record<string, string>
+
+      if (process.platform === "win32") {
+        env.LC_ALL = "C.UTF-8"
+        env.LC_CTYPE = "C.UTF-8"
+        env.LANG = "C.UTF-8"
+      }
+      log.info("creating local session", { id, cmd: command, args, cwd })
+
+      const spawn = await pty()
+      const localPty = spawn(command, args, {
+        name: "xterm-256color",
+        cwd,
+        env,
+      })
+
+      ptyProcess = localPty
+      pid = localPty.pid
     }
-    log.info("creating session", { id, cmd: command, args, cwd })
-
-    const spawn = await pty()
-    const ptyProcess = spawn(command, args, {
-      name: "xterm-256color",
-      cwd,
-      env,
-    })
 
     const info = {
       id,
@@ -130,7 +165,7 @@ export namespace Pty {
       args,
       cwd,
       status: "running",
-      pid: ptyProcess.pid,
+      pid,
     } as const
     const session: ActiveSession = {
       info,

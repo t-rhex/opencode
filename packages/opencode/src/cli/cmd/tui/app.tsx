@@ -97,7 +97,8 @@ async function getTerminalBackgroundColor(): Promise<"dark" | "light"> {
   })
 }
 
-import type { EventSource } from "./context/sdk"
+import type { EventSource, RemoteStateSource } from "./context/sdk"
+import { RemoteProvider } from "./context/remote"
 
 export function tui(input: {
   url: string
@@ -105,6 +106,7 @@ export function tui(input: {
   directory?: string
   fetch?: typeof fetch
   events?: EventSource
+  remoteState?: RemoteStateSource
   onExit?: () => Promise<void>
 }) {
   // promise to prevent immediate exit
@@ -132,27 +134,29 @@ export function tui(input: {
                         fetch={input.fetch}
                         events={input.events}
                       >
-                        <SyncProvider>
-                          <ThemeProvider mode={mode}>
-                            <LocalProvider>
-                              <KeybindProvider>
-                                <PromptStashProvider>
-                                  <DialogProvider>
-                                    <CommandProvider>
-                                      <FrecencyProvider>
-                                        <PromptHistoryProvider>
-                                          <PromptRefProvider>
-                                            <App />
-                                          </PromptRefProvider>
-                                        </PromptHistoryProvider>
-                                      </FrecencyProvider>
-                                    </CommandProvider>
-                                  </DialogProvider>
-                                </PromptStashProvider>
-                              </KeybindProvider>
-                            </LocalProvider>
-                          </ThemeProvider>
-                        </SyncProvider>
+                        <RemoteProvider source={input.remoteState}>
+                          <SyncProvider>
+                            <ThemeProvider mode={mode}>
+                              <LocalProvider>
+                                <KeybindProvider>
+                                  <PromptStashProvider>
+                                    <DialogProvider>
+                                      <CommandProvider>
+                                        <FrecencyProvider>
+                                          <PromptHistoryProvider>
+                                            <PromptRefProvider>
+                                              <App />
+                                            </PromptRefProvider>
+                                          </PromptHistoryProvider>
+                                        </FrecencyProvider>
+                                      </CommandProvider>
+                                    </DialogProvider>
+                                  </PromptStashProvider>
+                                </KeybindProvider>
+                              </LocalProvider>
+                            </ThemeProvider>
+                          </SyncProvider>
+                        </RemoteProvider>
                       </SDKProvider>
                     </RouteProvider>
                   </ToastProvider>

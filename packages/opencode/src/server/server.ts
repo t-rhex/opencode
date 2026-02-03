@@ -16,6 +16,7 @@ import { TuiRoutes } from "./routes/tui"
 import { Instance } from "../project/instance"
 import { CurrentFilesystem } from "../fs"
 import { Vcs } from "../project/vcs"
+import { Diagnostics } from "../remote/diagnostics"
 import { Agent } from "../agent/agent"
 import { Skill } from "../skill/skill"
 import { Auth } from "../auth"
@@ -297,7 +298,7 @@ export namespace Server {
           describeRoute({
             summary: "Get VCS info",
             description:
-              "Retrieve version control system (VCS) information for the current project, such as git branch.",
+              "Retrieve version control system (VCS) information for the current project, such as git branch and file status.",
             operationId: "vcs.get",
             responses: {
               200: {
@@ -311,10 +312,30 @@ export namespace Server {
             },
           }),
           async (c) => {
-            const branch = await Vcs.branch()
-            return c.json({
-              branch,
-            })
+            const info = await Vcs.get()
+            return c.json(info)
+          },
+        )
+        .get(
+          "/diagnostics",
+          describeRoute({
+            summary: "Get remote diagnostics",
+            description: "Retrieve system diagnostics (disk, memory, load) for remote connections.",
+            operationId: "diagnostics.get",
+            responses: {
+              200: {
+                description: "Diagnostics info",
+                content: {
+                  "application/json": {
+                    schema: resolver(Diagnostics.Info.nullable()),
+                  },
+                },
+              },
+            },
+          }),
+          async (c) => {
+            const info = await Diagnostics.get()
+            return c.json(info)
           },
         )
         .get(

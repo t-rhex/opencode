@@ -809,7 +809,7 @@ export function Session() {
             // Just open in editor without saving
             await Editor.open({ value: transcript, renderer })
           } else {
-            const exportDir = process.cwd()
+            const exportDir = sync.data.path.directory
             const filename = options.filename.trim()
             const filepath = path.join(exportDir, filename)
 
@@ -2047,8 +2047,8 @@ function Question(props: ToolProps<typeof QuestionTool>) {
 function normalizePath(input?: string, basePath?: string) {
   if (!input) return ""
   if (path.isAbsolute(input)) {
-    const base = basePath || process.cwd()
-    return path.relative(base, input) || "."
+    if (!basePath) return input
+    return path.relative(basePath, input) || "."
   }
   return input
 }

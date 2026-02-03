@@ -12,6 +12,7 @@ import { NamedError } from "@opencode-ai/util/error"
 import { withTimeout } from "../util/timeout"
 import { Instance } from "../project/instance"
 import { Filesystem } from "../util/filesystem"
+import { CurrentFilesystem } from "../fs"
 
 const DIAGNOSTICS_DEBOUNCE_MS = 150
 
@@ -146,6 +147,9 @@ export namespace LSPClient {
       },
       notify: {
         async open(input: { path: string }) {
+          // LSP requires local file access - skip in remote mode
+          if (CurrentFilesystem.isRemote()) return
+
           input.path = path.isAbsolute(input.path) ? input.path : path.resolve(Instance.directory, input.path)
           const file = Bun.file(input.path)
           const text = await file.text()

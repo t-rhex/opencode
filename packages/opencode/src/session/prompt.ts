@@ -953,9 +953,10 @@ export namespace SessionPrompt {
               // have to normalize, symbol search returns absolute paths
               // Decode the pathname since URL constructor doesn't automatically decode it
               const filepath = fileURLToPath(part.url)
-              const stat = await Bun.file(filepath).stat()
+              const promptFs = CurrentFilesystem.get()
+              const stat = await promptFs.stat(filepath)
 
-              if (stat.isDirectory()) {
+              if (stat.isDirectory) {
                 part.mime = "application/x-directory"
               }
 
@@ -1109,7 +1110,7 @@ export namespace SessionPrompt {
                 ]
               }
 
-              const file = Bun.file(filepath)
+              const fileBytes = await promptFs.readBytes(filepath)
               FileTime.read(input.sessionID, filepath)
               return [
                 {
@@ -1125,7 +1126,7 @@ export namespace SessionPrompt {
                   messageID: info.id,
                   sessionID: input.sessionID,
                   type: "file",
-                  url: `data:${part.mime};base64,` + Buffer.from(await file.bytes()).toString("base64"),
+                  url: `data:${part.mime};base64,` + Buffer.from(fileBytes).toString("base64"),
                   mime: part.mime,
                   filename: part.filename!,
                   source: part.source,
@@ -1234,7 +1235,8 @@ export namespace SessionPrompt {
     // Switching from plan mode to build mode
     if (input.agent.name !== "plan" && assistantMessage?.info.agent === "plan") {
       const plan = Session.plan(input.session)
-      const exists = await Bun.file(plan).exists()
+      const planFs = CurrentFilesystem.get()
+      const exists = await planFs.exists(plan)
       if (exists) {
         const part = await Session.updatePart({
           id: Identifier.ascending("part"),
@@ -1253,8 +1255,9 @@ export namespace SessionPrompt {
     // Entering plan mode
     if (input.agent.name === "plan" && assistantMessage?.info.agent !== "plan") {
       const plan = Session.plan(input.session)
-      const exists = await Bun.file(plan).exists()
-      if (!exists) await fs.mkdir(path.dirname(plan), { recursive: true })
+      const planFs = CurrentFilesystem.get()
+      const exists = await planFs.exists(plan)
+      if (!exists) await planFs.mkdir(path.dirname(plan), true)
       const part = await Session.updatePart({
         id: Identifier.ascending("part"),
         messageID: userMessage.info.id,

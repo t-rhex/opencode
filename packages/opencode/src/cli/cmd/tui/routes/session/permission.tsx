@@ -21,15 +21,24 @@ type PermissionStage = "permission" | "always" | "reject"
 function normalizePath(input?: string, basePath?: string) {
   if (!input) return ""
 
-  const cwd = basePath || process.cwd()
   const home = Global.Path.home
-  const absolute = path.isAbsolute(input) ? input : path.resolve(cwd, input)
-  const relative = path.relative(cwd, absolute)
+
+  // If no basePath, return absolute path with ~ substitution
+  if (!basePath) {
+    const absolute = path.isAbsolute(input) ? input : input
+    if (home && (absolute === home || absolute.startsWith(home + path.sep))) {
+      return absolute.replace(home, "~")
+    }
+    return absolute
+  }
+
+  const absolute = path.isAbsolute(input) ? input : path.resolve(basePath, input)
+  const relative = path.relative(basePath, absolute)
 
   if (!relative) return "."
   if (!relative.startsWith("..")) return relative
 
-  // outside cwd - use ~ or absolute
+  // outside basePath - use ~ or absolute
   if (home && (absolute === home || absolute.startsWith(home + path.sep))) {
     return absolute.replace(home, "~")
   }

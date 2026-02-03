@@ -47,7 +47,7 @@ export const LspTool = Tool.define("lsp", {
     const relPath = path.relative(Instance.worktree, file)
     const title = `${args.operation} ${relPath}:${args.line}:${args.character}`
 
-    const exists = await Bun.file(file).exists()
+    const exists = await Instance.fs.exists(file)
     if (!exists) {
       throw new Error(`File not found: ${file}`)
     }

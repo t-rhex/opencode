@@ -110,15 +110,9 @@ export namespace Format {
       for (const item of await getFormatter(ext)) {
         log.info("running", { command: item.command })
         try {
-          const proc = Bun.spawn({
-            cmd: item.command.map((x) => x.replace("$FILE", file)),
-            cwd: Instance.directory,
-            env: { ...process.env, ...item.environment },
-            stdout: "ignore",
-            stderr: "ignore",
-          })
-          const exit = await proc.exited
-          if (exit !== 0)
+          const command = item.command.map((x) => x.replace("$FILE", file)).join(" ")
+          const result = await Instance.fs.exec(command, { cwd: Instance.directory, env: item.environment })
+          if (result.exitCode !== 0)
             log.error("failed", {
               command: item.command,
               ...item.environment,

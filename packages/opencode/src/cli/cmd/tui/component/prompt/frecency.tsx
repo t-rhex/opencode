@@ -4,6 +4,7 @@ import { onMount } from "solid-js"
 import { createStore } from "solid-js/store"
 import { createSimpleContext } from "../../context/helper"
 import { appendFile } from "fs/promises"
+import { useSync } from "../../context/sync"
 
 function calculateFrecency(entry?: { frequency: number; lastOpen: number }): number {
   if (!entry) return 0
@@ -17,6 +18,7 @@ const MAX_FRECENCY_ENTRIES = 1000
 export const { use: useFrecency, provider: FrecencyProvider } = createSimpleContext({
   name: "Frecency",
   init: () => {
+    const sync = useSync()
     const frecencyFile = Bun.file(path.join(Global.Path.state, "frecency.jsonl"))
     onMount(async () => {
       const text = await frecencyFile.text().catch(() => "")
@@ -62,7 +64,8 @@ export const { use: useFrecency, provider: FrecencyProvider } = createSimpleCont
     })
 
     function updateFrecency(filePath: string) {
-      const absolutePath = path.resolve(process.cwd(), filePath)
+      const worktree = sync.data.path.worktree
+      const absolutePath = path.resolve(worktree, filePath)
       const newEntry = {
         frequency: (store.data[absolutePath]?.frequency || 0) + 1,
         lastOpen: Date.now(),
@@ -75,13 +78,16 @@ export const { use: useFrecency, provider: FrecencyProvider } = createSimpleCont
           .sort(([, a], [, b]) => b.lastOpen - a.lastOpen)
           .slice(0, MAX_FRECENCY_ENTRIES)
         setStore("data", Object.fromEntries(sorted))
-        const content = sorted.map(([path, entry]) => JSON.stringify({ path, ...entry })).join("\n") + "\n"
+        const content = sorted.map(([p, entry]) => JSON.stringify({ path: p, ...entry })).join("\n") + "\n"
         Bun.write(frecencyFile, content).catch(() => {})
       }
     }
 
     return {
-      getFrecency: (filePath: string) => calculateFrecency(store.data[path.resolve(process.cwd(), filePath)]),
+      getFrecency: (filePath: string) => {
+        const worktree = sync.data.path.worktree
+        return calculateFrecency(store.data[path.resolve(worktree, filePath)])
+      },
       updateFrecency,
       data: () => store.data,
     }

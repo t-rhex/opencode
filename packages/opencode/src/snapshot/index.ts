@@ -1,17 +1,48 @@
-import { $ } from "bun"
+import crypto from "crypto"
 import path from "path"
-import fs from "fs/promises"
 import { Log } from "../util/log"
 import { Global } from "../global"
 import z from "zod"
 import { Config } from "../config/config"
 import { Instance } from "../project/instance"
 import { Scheduler } from "../scheduler"
+import { CurrentFilesystem } from "../fs"
 
 export namespace Snapshot {
   const log = Log.create({ service: "snapshot" })
   const hour = 60 * 60 * 1000
   const prune = "7.days"
+
+  function isDisabled() {
+    return false
+  }
+
+  function gitdir() {
+    if (CurrentFilesystem.isRemote()) {
+      const remoteDir = CurrentFilesystem.getRemoteDirectory() ?? Instance.directory
+      const id = crypto.createHash("sha256").update(remoteDir).digest("hex").slice(0, 12)
+      return `~/.local/share/opencode/snapshot/${id}`
+    }
+    return path.join(Global.Path.data, "snapshot", Instance.project.id)
+  }
+
+  async function git(args: string): Promise<{ stdout: string; exitCode: number }> {
+    const dir = gitdir()
+    const worktree = Instance.worktree
+    const cmd = `git --git-dir "${dir}" --work-tree "${worktree}" ${args}`
+    const result = await Instance.fs.exec(cmd, { cwd: Instance.directory })
+    return { stdout: result.stdout, exitCode: result.exitCode }
+  }
+
+  async function ensureInitialized() {
+    const dir = gitdir()
+    const exists = await Instance.fs.exists(dir)
+    if (!exists) {
+      await Instance.fs.mkdir(dir, true)
+      await git("init")
+      await git("config core.autocrlf false")
+    }
+  }
 
   export function init() {
     Scheduler.register({
@@ -23,24 +54,18 @@ export namespace Snapshot {
   }
 
   export async function cleanup() {
+    if (isDisabled()) return
     if (Instance.project.vcs !== "git") return
     const cfg = await Config.get()
     if (cfg.snapshot === false) return
-    const git = gitdir()
-    const exists = await fs
-      .stat(git)
-      .then(() => true)
-      .catch(() => false)
+    const dir = gitdir()
+    const exists = await Instance.fs.exists(dir)
     if (!exists) return
-    const result = await $`git --git-dir ${git} --work-tree ${Instance.worktree} gc --prune=${prune}`
-      .quiet()
-      .cwd(Instance.directory)
-      .nothrow()
+    const result = await git(`gc --prune=${prune}`)
     if (result.exitCode !== 0) {
       log.warn("cleanup failed", {
         exitCode: result.exitCode,
-        stderr: result.stderr.toString(),
-        stdout: result.stdout.toString(),
+        stdout: result.stdout,
       })
       return
     }
@@ -48,31 +73,16 @@ export namespace Snapshot {
   }
 
   export async function track() {
+    if (isDisabled()) return
     if (Instance.project.vcs !== "git") return
     const cfg = await Config.get()
     if (cfg.snapshot === false) return
-    const git = gitdir()
-    if (await fs.mkdir(git, { recursive: true })) {
-      await $`git init`
-        .env({
-          ...process.env,
-          GIT_DIR: git,
-          GIT_WORK_TREE: Instance.worktree,
-        })
-        .quiet()
-        .nothrow()
-      // Configure git to not convert line endings on Windows
-      await $`git --git-dir ${git} config core.autocrlf false`.quiet().nothrow()
-      log.info("initialized")
-    }
-    await $`git --git-dir ${git} --work-tree ${Instance.worktree} add .`.quiet().cwd(Instance.directory).nothrow()
-    const hash = await $`git --git-dir ${git} --work-tree ${Instance.worktree} write-tree`
-      .quiet()
-      .cwd(Instance.directory)
-      .nothrow()
-      .text()
-    log.info("tracking", { hash, cwd: Instance.directory, git })
-    return hash.trim()
+    await ensureInitialized()
+    await git("add .")
+    const result = await git("write-tree")
+    const hash = result.stdout.trim()
+    log.info("tracking", { hash, cwd: Instance.directory, git: gitdir() })
+    return hash
   }
 
   export const Patch = z.object({
@@ -82,13 +92,11 @@ export namespace Snapshot {
   export type Patch = z.infer<typeof Patch>
 
   export async function patch(hash: string): Promise<Patch> {
-    const git = gitdir()
-    await $`git --git-dir ${git} --work-tree ${Instance.worktree} add .`.quiet().cwd(Instance.directory).nothrow()
-    const result =
-      await $`git -c core.autocrlf=false -c core.quotepath=false --git-dir ${git} --work-tree ${Instance.worktree} diff --no-ext-diff --name-only ${hash} -- .`
-        .quiet()
-        .cwd(Instance.directory)
-        .nothrow()
+    if (isDisabled()) return { hash, files: [] }
+    await git("add .")
+    const result = await git(
+      `-c core.autocrlf=false -c core.quotepath=false diff --no-ext-diff --name-only ${hash} -- .`,
+    )
 
     // If git diff fails, return empty patch
     if (result.exitCode !== 0) {
@@ -96,89 +104,79 @@ export namespace Snapshot {
       return { hash, files: [] }
     }
 
-    const files = result.text()
     return {
       hash,
-      files: files
+      files: result.stdout
         .trim()
         .split("\n")
-        .map((x) => x.trim())
+        .map((x: string) => x.trim())
         .filter(Boolean)
-        .map((x) => path.join(Instance.worktree, x)),
+        .map((x: string) => path.join(Instance.worktree, x)),
     }
   }
 
   export async function restore(snapshot: string) {
+    if (isDisabled()) return
     log.info("restore", { commit: snapshot })
-    const git = gitdir()
-    const result =
-      await $`git --git-dir ${git} --work-tree ${Instance.worktree} read-tree ${snapshot} && git --git-dir ${git} --work-tree ${Instance.worktree} checkout-index -a -f`
-        .quiet()
-        .cwd(Instance.worktree)
-        .nothrow()
-
-    if (result.exitCode !== 0) {
-      log.error("failed to restore snapshot", {
+    const readTree = await git(`read-tree ${snapshot}`)
+    if (readTree.exitCode !== 0) {
+      log.error("failed to restore snapshot (read-tree)", {
         snapshot,
-        exitCode: result.exitCode,
-        stderr: result.stderr.toString(),
-        stdout: result.stdout.toString(),
+        exitCode: readTree.exitCode,
+        stdout: readTree.stdout,
+      })
+      return
+    }
+    const checkout = await git("checkout-index -a -f")
+    if (checkout.exitCode !== 0) {
+      log.error("failed to restore snapshot (checkout-index)", {
+        snapshot,
+        exitCode: checkout.exitCode,
+        stdout: checkout.stdout,
       })
     }
   }
 
   export async function revert(patches: Patch[]) {
-    const files = new Set<string>()
-    const git = gitdir()
+    if (isDisabled()) return
+    const seen = new Set<string>()
     for (const item of patches) {
       for (const file of item.files) {
-        if (files.has(file)) continue
+        if (seen.has(file)) continue
         log.info("reverting", { file, hash: item.hash })
-        const result = await $`git --git-dir ${git} --work-tree ${Instance.worktree} checkout ${item.hash} -- ${file}`
-          .quiet()
-          .cwd(Instance.worktree)
-          .nothrow()
+        const result = await git(`checkout ${item.hash} -- "${file}"`)
         if (result.exitCode !== 0) {
           const relativePath = path.relative(Instance.worktree, file)
-          const checkTree =
-            await $`git --git-dir ${git} --work-tree ${Instance.worktree} ls-tree ${item.hash} -- ${relativePath}`
-              .quiet()
-              .cwd(Instance.worktree)
-              .nothrow()
-          if (checkTree.exitCode === 0 && checkTree.text().trim()) {
+          const checkTree = await git(`ls-tree ${item.hash} -- "${relativePath}"`)
+          if (checkTree.exitCode === 0 && checkTree.stdout.trim()) {
             log.info("file existed in snapshot but checkout failed, keeping", {
               file,
             })
           } else {
             log.info("file did not exist in snapshot, deleting", { file })
-            await fs.unlink(file).catch(() => {})
+            await Instance.fs.unlink(file).catch(() => {})
           }
         }
-        files.add(file)
+        seen.add(file)
       }
     }
   }
 
   export async function diff(hash: string) {
-    const git = gitdir()
-    await $`git --git-dir ${git} --work-tree ${Instance.worktree} add .`.quiet().cwd(Instance.directory).nothrow()
-    const result =
-      await $`git -c core.autocrlf=false -c core.quotepath=false --git-dir ${git} --work-tree ${Instance.worktree} diff --no-ext-diff ${hash} -- .`
-        .quiet()
-        .cwd(Instance.worktree)
-        .nothrow()
+    if (isDisabled()) return ""
+    await git("add .")
+    const result = await git(`-c core.autocrlf=false -c core.quotepath=false diff --no-ext-diff ${hash} -- .`)
 
     if (result.exitCode !== 0) {
       log.warn("failed to get diff", {
         hash,
         exitCode: result.exitCode,
-        stderr: result.stderr.toString(),
-        stdout: result.stdout.toString(),
+        stdout: result.stdout,
       })
       return ""
     }
 
-    return result.text().trim()
+    return result.stdout.trim()
   }
 
   export const FileDiff = z
@@ -194,28 +192,25 @@ export namespace Snapshot {
     })
   export type FileDiff = z.infer<typeof FileDiff>
   export async function diffFull(from: string, to: string): Promise<FileDiff[]> {
-    const git = gitdir()
+    if (isDisabled()) return []
     const result: FileDiff[] = []
-    for await (const line of $`git -c core.autocrlf=false -c core.quotepath=false --git-dir ${git} --work-tree ${Instance.worktree} diff --no-ext-diff --no-renames --numstat ${from} ${to} -- .`
-      .quiet()
-      .cwd(Instance.directory)
-      .nothrow()
-      .lines()) {
-      if (!line) continue
+    const numstat = await git(
+      `-c core.autocrlf=false -c core.quotepath=false diff --no-ext-diff --no-renames --numstat ${from} ${to} -- .`,
+    )
+    if (numstat.exitCode !== 0) return []
+
+    const lines = numstat.stdout.trim().split("\n").filter(Boolean)
+    for (const line of lines) {
       const [additions, deletions, file] = line.split("\t")
       const isBinaryFile = additions === "-" && deletions === "-"
-      const before = isBinaryFile
-        ? ""
-        : await $`git -c core.autocrlf=false --git-dir ${git} --work-tree ${Instance.worktree} show ${from}:${file}`
-            .quiet()
-            .nothrow()
-            .text()
-      const after = isBinaryFile
-        ? ""
-        : await $`git -c core.autocrlf=false --git-dir ${git} --work-tree ${Instance.worktree} show ${to}:${file}`
-            .quiet()
-            .nothrow()
-            .text()
+      let before = ""
+      let after = ""
+      if (!isBinaryFile) {
+        const beforeResult = await git(`-c core.autocrlf=false show ${from}:${file}`)
+        before = beforeResult.exitCode === 0 ? beforeResult.stdout : ""
+        const afterResult = await git(`-c core.autocrlf=false show ${to}:${file}`)
+        after = afterResult.exitCode === 0 ? afterResult.stdout : ""
+      }
       const added = isBinaryFile ? 0 : parseInt(additions)
       const deleted = isBinaryFile ? 0 : parseInt(deletions)
       result.push({
@@ -227,10 +222,5 @@ export namespace Snapshot {
       })
     }
     return result
-  }
-
-  function gitdir() {
-    const project = Instance.project
-    return path.join(Global.Path.data, "snapshot", project.id)
   }
 }

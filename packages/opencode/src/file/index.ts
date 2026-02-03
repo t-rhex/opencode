@@ -1,6 +1,5 @@
 import { BusEvent } from "@/bus/bus-event"
 import z from "zod"
-import { $ } from "bun"
 import type { BunFile } from "bun"
 import { formatPatch, structuredPatch } from "diff"
 import path from "path"
@@ -12,9 +11,15 @@ import { Instance } from "../project/instance"
 import { Ripgrep } from "./ripgrep"
 import fuzzysort from "fuzzysort"
 import { Global } from "../global"
+import { LocalFilesystem } from "../fs"
 
 export namespace File {
   const log = Log.create({ service: "file" })
+
+  async function git(args: string, cwd: string): Promise<{ stdout: string; exitCode: number }> {
+    const result = await Instance.fs.exec(`git ${args}`, { cwd })
+    return { stdout: result.stdout, exitCode: result.exitCode }
+  }
 
   export const Info = z
     .object({
@@ -206,11 +211,8 @@ export namespace File {
     const project = Instance.project
     if (project.vcs !== "git") return []
 
-    const diffOutput = await $`git -c core.quotepath=false diff --numstat HEAD`
-      .cwd(Instance.directory)
-      .quiet()
-      .nothrow()
-      .text()
+    const diffResult = await git("-c core.quotepath=false diff --numstat HEAD", Instance.directory)
+    const diffOutput = diffResult.exitCode === 0 ? diffResult.stdout : ""
 
     const changedFiles: Info[] = []
 
@@ -227,17 +229,18 @@ export namespace File {
       }
     }
 
-    const untrackedOutput = await $`git -c core.quotepath=false ls-files --others --exclude-standard`
-      .cwd(Instance.directory)
-      .quiet()
-      .nothrow()
-      .text()
+    const untrackedResult = await git(
+      "-c core.quotepath=false ls-files --others --exclude-standard",
+      Instance.directory,
+    )
+    const untrackedOutput = untrackedResult.exitCode === 0 ? untrackedResult.stdout : ""
 
     if (untrackedOutput.trim()) {
       const untrackedFiles = untrackedOutput.trim().split("\n")
+      const filesystem = Instance.fs
       for (const filepath of untrackedFiles) {
         try {
-          const content = await Bun.file(path.join(Instance.directory, filepath)).text()
+          const content = await filesystem.read(path.join(Instance.directory, filepath))
           const lines = content.split("\n").length
           changedFiles.push({
             path: filepath,
@@ -252,11 +255,8 @@ export namespace File {
     }
 
     // Get deleted files
-    const deletedOutput = await $`git -c core.quotepath=false diff --name-only --diff-filter=D HEAD`
-      .cwd(Instance.directory)
-      .quiet()
-      .nothrow()
-      .text()
+    const deletedResult = await git("-c core.quotepath=false diff --name-only --diff-filter=D HEAD", Instance.directory)
+    const deletedOutput = deletedResult.exitCode === 0 ? deletedResult.stdout : ""
 
     if (deletedOutput.trim()) {
       const deletedFiles = deletedOutput.trim().split("\n")
@@ -287,31 +287,76 @@ export namespace File {
       throw new Error(`Access denied: path escapes project directory`)
     }
 
-    const bunFile = Bun.file(full)
+    const filesystem = Instance.fs
+    const isLocal = filesystem instanceof LocalFilesystem
 
-    if (!(await bunFile.exists())) {
+    if (!(await filesystem.exists(full))) {
       return { type: "text", content: "" }
     }
 
-    const encode = await shouldEncode(bunFile)
+    // For binary file detection, we use Bun.file locally, otherwise assume text
+    if (isLocal) {
+      const bunFile = Bun.file(full)
+      const encode = await shouldEncode(bunFile)
 
-    if (encode) {
-      const buffer = await bunFile.arrayBuffer().catch(() => new ArrayBuffer(0))
-      const content = Buffer.from(buffer).toString("base64")
-      const mimeType = bunFile.type || "application/octet-stream"
-      return { type: "text", content, mimeType, encoding: "base64" }
+      if (encode) {
+        const buffer = await bunFile.arrayBuffer().catch(() => new ArrayBuffer(0))
+        const content = Buffer.from(buffer).toString("base64")
+        const mimeType = bunFile.type || "application/octet-stream"
+        return { type: "text", content, mimeType, encoding: "base64" }
+      }
+    } else {
+      // For remote, check file extension for binary types
+      const ext = path.extname(file).toLowerCase()
+      const binaryExtensions = [
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".bmp",
+        ".ico",
+        ".webp",
+        ".mp3",
+        ".mp4",
+        ".wav",
+        ".ogg",
+        ".pdf",
+        ".zip",
+        ".tar",
+        ".gz",
+        ".rar",
+        ".7z",
+        ".exe",
+        ".dll",
+        ".so",
+        ".dylib",
+        ".woff",
+        ".woff2",
+        ".ttf",
+        ".eot",
+      ]
+      if (binaryExtensions.includes(ext)) {
+        const bytes = await filesystem.readBytes(full)
+        const content = Buffer.from(bytes).toString("base64")
+        return { type: "text", content, mimeType: "application/octet-stream", encoding: "base64" }
+      }
     }
 
-    const content = await bunFile
-      .text()
+    const content = await filesystem
+      .read(full)
       .catch(() => "")
       .then((x) => x.trim())
 
     if (project.vcs === "git") {
-      let diff = await $`git diff ${file}`.cwd(Instance.directory).quiet().nothrow().text()
-      if (!diff.trim()) diff = await $`git diff --staged ${file}`.cwd(Instance.directory).quiet().nothrow().text()
+      const diffResult = await git(`diff ${file}`, Instance.directory)
+      let diff = diffResult.exitCode === 0 ? diffResult.stdout : ""
+      if (!diff.trim()) {
+        const stagedResult = await git(`diff --staged ${file}`, Instance.directory)
+        diff = stagedResult.exitCode === 0 ? stagedResult.stdout : ""
+      }
       if (diff.trim()) {
-        const original = await $`git show HEAD:${file}`.cwd(Instance.directory).quiet().nothrow().text()
+        const originalResult = await git(`show HEAD:${file}`, Instance.directory)
+        const original = originalResult.exitCode === 0 ? originalResult.stdout : ""
         const patch = structuredPatch(file, file, original, content, "old", "new", {
           context: Infinity,
           ignoreWhitespace: true,
@@ -326,16 +371,17 @@ export namespace File {
   export async function list(dir?: string) {
     const exclude = [".git", ".DS_Store"]
     const project = Instance.project
+    const filesystem = Instance.fs
     let ignored = (_: string) => false
     if (project.vcs === "git") {
       const ig = ignore()
-      const gitignore = Bun.file(path.join(Instance.worktree, ".gitignore"))
-      if (await gitignore.exists()) {
-        ig.add(await gitignore.text())
+      const gitignorePath = path.join(Instance.worktree, ".gitignore")
+      if (await filesystem.exists(gitignorePath)) {
+        ig.add(await filesystem.read(gitignorePath))
       }
-      const ignoreFile = Bun.file(path.join(Instance.worktree, ".ignore"))
-      if (await ignoreFile.exists()) {
-        ig.add(await ignoreFile.text())
+      const ignorePath = path.join(Instance.worktree, ".ignore")
+      if (await filesystem.exists(ignorePath)) {
+        ig.add(await filesystem.read(ignorePath))
       }
       ignored = ig.ignores.bind(ig)
     }
@@ -348,17 +394,16 @@ export namespace File {
     }
 
     const nodes: Node[] = []
-    for (const entry of await fs.promises
-      .readdir(resolved, {
-        withFileTypes: true,
-      })
-      .catch(() => [])) {
-      if (exclude.includes(entry.name)) continue
-      const fullPath = path.join(resolved, entry.name)
+    const entries = await filesystem.readdir(resolved).catch(() => [] as string[])
+    for (const name of entries) {
+      if (exclude.includes(name)) continue
+      const fullPath = path.join(resolved, name)
       const relativePath = path.relative(Instance.directory, fullPath)
-      const type = entry.isDirectory() ? "directory" : "file"
+      const stat = await filesystem.stat(fullPath).catch(() => null)
+      if (!stat) continue
+      const type = stat.isDirectory ? "directory" : "file"
       nodes.push({
-        name: entry.name,
+        name,
         path: relativePath,
         absolute: fullPath,
         type,
