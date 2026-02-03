@@ -97,7 +97,7 @@ export const RemoteRoutes = lazy(() =>
         const config = await Config.get()
         const parsed = parseTarget(target, config)
 
-        log.info("connecting to remote", { host: parsed.host, port: parsed.port })
+        log.info("connecting to remote", { host: parsed.host, port: parsed.port, username: parsed.username })
 
         const fs = new RemoteFilesystem(
           {
@@ -117,7 +117,15 @@ export const RemoteRoutes = lazy(() =>
           },
         )
 
-        await fs.connect()
+        const err = await fs.connect().then(
+          () => null,
+          (e: unknown) => e,
+        )
+        if (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          log.error("ssh connection failed", { host: parsed.host, error: msg })
+          return c.json({ error: `SSH connection failed: ${msg}` }, { status: 502 })
+        }
 
         if (parsed.remoteDir) {
           const exists = await fs.exists(parsed.remoteDir)
@@ -138,8 +146,8 @@ export const RemoteRoutes = lazy(() =>
 
         if (parsed.setupCommand) {
           log.info("running remote setup command", { command: parsed.setupCommand })
-          await fs.exec(parsed.setupCommand).catch((err: unknown) => {
-            log.warn("remote setup command failed", { error: err instanceof Error ? err.message : String(err) })
+          await fs.exec(parsed.setupCommand).catch((e: unknown) => {
+            log.warn("remote setup command failed", { error: e instanceof Error ? e.message : String(e) })
           })
         }
 

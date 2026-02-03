@@ -44,14 +44,17 @@ export function DialogRemote() {
   }
 
   const connect = async (target: string) => {
+    dialog.clear()
     toast.show({ variant: "info", message: `Connecting to ${target}...` })
-    const result = await api("/connect", "POST", { target })
-    if (result.connected) {
+    const result = await api("/connect", "POST", { target }).catch((e: unknown) => ({
+      error: e instanceof Error ? e.message : String(e),
+    }))
+    if ("connected" in result && result.connected) {
       toast.show({ variant: "success", message: `Connected to ${result.host}` })
       home()
       return
     }
-    toast.show({ variant: "error", message: result.error ?? "Connection failed" })
+    toast.show({ variant: "error", message: result.error ?? "Connection failed", duration: 10000 })
   }
 
   const options = createMemo(() => {
