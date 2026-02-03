@@ -3,6 +3,7 @@ import { cmd } from "./cmd"
 import * as prompts from "@clack/prompts"
 import { UI } from "../ui"
 import { ModelsDev } from "../../provider/models"
+import { Provider } from "../../provider/provider"
 import { map, pipe, sortBy, values } from "remeda"
 import path from "path"
 import os from "os"
@@ -191,6 +192,7 @@ export const AuthListCommand = cmd({
     const activeEnvVars: Array<{ provider: string; envVar: string }> = []
 
     for (const [providerID, provider] of Object.entries(database)) {
+      if (!Provider.isAllowedProvider(providerID)) continue
       for (const envVar of provider.env) {
         if (process.env[envVar]) {
           activeEnvVars.push({
@@ -261,6 +263,7 @@ export const AuthLoginCommand = cmd({
         const providers = await ModelsDev.get().then((x) => {
           const filtered: Record<string, (typeof x)[string]> = {}
           for (const [key, value] of Object.entries(x)) {
+            if (!Provider.isAllowedProvider(key)) continue
             if ((enabled ? enabled.has(key) : true) && !disabled.has(key)) {
               filtered[key] = value
             }

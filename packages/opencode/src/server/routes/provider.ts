@@ -5,7 +5,7 @@ import { Config } from "../../config/config"
 import { Provider } from "../../provider/provider"
 import { ModelsDev } from "../../provider/models"
 import { ProviderAuth } from "../../provider/auth"
-import { mapValues } from "remeda"
+import { mapValues, pickBy } from "remeda"
 import { errors } from "../error"
 import { lazy } from "../../util/lazy"
 
@@ -42,6 +42,7 @@ export const ProviderRoutes = lazy(() =>
         const allProviders = await ModelsDev.get()
         const filteredProviders: Record<string, (typeof allProviders)[string]> = {}
         for (const [key, value] of Object.entries(allProviders)) {
+          if (!Provider.isAllowedProvider(key)) continue
           if ((enabled ? enabled.has(key) : true) && !disabled.has(key)) {
             filteredProviders[key] = value
           }

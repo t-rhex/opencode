@@ -60,6 +60,13 @@ export namespace Provider {
     return isGpt5OrLater(modelID) && !modelID.startsWith("gpt-5-mini")
   }
 
+  // Only these provider IDs are supported (Copilot-only build)
+  const ALLOWED_PROVIDERS = new Set(["github-copilot", "github-copilot-enterprise"])
+
+  export function isAllowedProvider(id: string) {
+    return ALLOWED_PROVIDERS.has(id)
+  }
+
   const BUNDLED_PROVIDERS: Record<string, (options: any) => SDK> = {
     // NOTE: Non-Copilot providers commented out
     /*
@@ -703,6 +710,11 @@ export namespace Provider {
     const config = await Config.get()
     const modelsDev = await ModelsDev.get()
     const database = mapValues(modelsDev, fromModelsDevProvider)
+
+    // Filter database to only allowed providers (Copilot-only build)
+    for (const id of Object.keys(database)) {
+      if (!ALLOWED_PROVIDERS.has(id)) delete database[id]
+    }
 
     const disabled = new Set(config.disabled_providers ?? [])
     const enabled = config.enabled_providers ? new Set(config.enabled_providers) : null
