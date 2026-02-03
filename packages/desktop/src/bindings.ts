@@ -10,10 +10,50 @@ export const commands = {
   getDefaultServerUrl: () => __TAURI_INVOKE<string | null>("get_default_server_url"),
   setDefaultServerUrl: (url: string | null) => __TAURI_INVOKE<null>("set_default_server_url", { url }),
   parseMarkdownCommand: (markdown: string) => __TAURI_INVOKE<string>("parse_markdown_command", { markdown }),
+  remoteConnect: (target: string, repo: string, gitRef: string, keyPath: string | null) =>
+    __TAURI_INVOKE<RemoteConnectResult>("remote_connect", { target, repo, gitRef, keyPath }),
+  remoteConnectDirectory: (target: string, path: string, keyPath: string | null) =>
+    __TAURI_INVOKE<RemoteConnectResult>("remote_connect_directory", { target, path, keyPath }),
+  remoteBrowseDirectory: (target: string, path: string, keyPath: string | null) =>
+    __TAURI_INVOKE<BrowseResult>("remote_browse_directory", { target, path, keyPath }),
+  remoteCreateDirectory: (target: string, path: string, keyPath: string | null) =>
+    __TAURI_INVOKE<string>("remote_create_directory", { target, path, keyPath }),
+  remoteDisconnect: () => __TAURI_INVOKE<void>("remote_disconnect"),
+  remoteListSessions: (target: string, keyPath: string | null) =>
+    __TAURI_INVOKE<RemoteSession[]>("remote_list_sessions", { target, keyPath }),
+  remoteStopSession: (target: string, sessionId: string, keyPath: string | null) =>
+    __TAURI_INVOKE<void>("remote_stop_session", { target, sessionId, keyPath }),
 }
 
 /* Types */
 export type ServerReadyData = {
   url: string
   password: string | null
+}
+
+export type RemoteSession = {
+  id: string
+  target: string
+  repo: string
+  git_ref: string
+  port: number
+  local_port: number
+  started_at: string
+}
+
+export type RemoteConnectResult = {
+  url: string
+  password: string | null
+  session: RemoteSession
+}
+
+export type DirectoryEntry = {
+  name: string
+  isDir: boolean
+  path: string
+}
+
+export type BrowseResult = {
+  entries: DirectoryEntry[]
+  path: string
 }
