@@ -96,6 +96,7 @@ export type FileDiff = {
   after: string
   additions: number
   deletions: number
+  status?: "added" | "deleted" | "modified"
 }
 
 export type UserMessage = {
@@ -1342,6 +1343,10 @@ export type ServerConfig = {
    */
   mdns?: boolean
   /**
+   * Custom domain name for mDNS service (default: opencode.local)
+   */
+  mdnsDomain?: string
+  /**
    * Additional domains to allow for CORS
    */
   cors?: Array<string>
@@ -1381,6 +1386,10 @@ export type PermissionConfig =
 
 export type AgentConfig = {
   model?: string
+  /**
+   * Default model variant for this agent (applies only when using the agent's configured model).
+   */
+  variant?: string
   temperature?: number
   top_p?: number
   prompt?: string
@@ -2052,7 +2061,7 @@ export type FileNode = {
 }
 
 export type FileContent = {
-  type: "text"
+  type: "text" | "binary"
   content: string
   diff?: string
   patch?: {
@@ -2163,6 +2172,7 @@ export type Agent = {
     modelID: string
     providerID: string
   }
+  variant?: string
   prompt?: string
   options: {
     [key: string]: unknown

@@ -124,7 +124,10 @@ export const BashTool = Tool.define("bash", async () => {
                       .replace(/^\/([a-z])\//, (_: string, drive: string) => `${drive.toUpperCase()}:\\`)
                       .replace(/\//g, "\\")
                   : resolved
-              if (!Instance.containsPath(normalized)) directories.add(normalized)
+              if (!Instance.containsPath(normalized)) {
+                const dir = (await Filesystem.isDir(normalized)) ? normalized : path.dirname(normalized)
+                directories.add(dir)
+              }
             }
           }
         }
@@ -137,10 +140,11 @@ export const BashTool = Tool.define("bash", async () => {
       }
 
       if (directories.size > 0) {
+        const globs = Array.from(directories).map((dir) => path.join(dir, "*"))
         await ctx.ask({
           permission: "external_directory",
-          patterns: Array.from(directories),
-          always: Array.from(directories).map((x) => path.dirname(x) + "*"),
+          patterns: globs,
+          always: globs,
           metadata: {},
         })
       }

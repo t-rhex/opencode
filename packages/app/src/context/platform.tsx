@@ -1,5 +1,6 @@
 import { createSimpleContext } from "@opencode-ai/ui/context"
 import { AsyncStorage, SyncStorage } from "@solid-primitives/storage"
+import type { Accessor } from "solid-js"
 
 export type SavedConnection = {
   id: string
@@ -123,6 +124,9 @@ export type Platform = {
 
   /** Stop a session on a remote host */
   remoteStopSession?(target: string, sessionId: string, keyPath?: string): Promise<void>
+
+  /** Webview zoom level (desktop only) */
+  webviewZoom?: Accessor<number>
 }
 
 export const { use: usePlatform, provider: PlatformProvider } = createSimpleContext({

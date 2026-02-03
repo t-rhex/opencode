@@ -1,5 +1,5 @@
 // @refresh reload
-import "./webview-zoom"
+import { webviewZoom } from "./webview-zoom"
 import { render } from "solid-js/web"
 import { AppBaseProviders, AppInterface, PlatformProvider, Platform } from "@opencode-ai/app"
 import { open, save } from "@tauri-apps/plugin-dialog"
@@ -7,7 +7,6 @@ import { getCurrent, onOpenUrl } from "@tauri-apps/plugin-deep-link"
 import { open as shellOpen } from "@tauri-apps/plugin-shell"
 import { type as ostype } from "@tauri-apps/plugin-os"
 import { check, Update } from "@tauri-apps/plugin-updater"
-import { invoke } from "@tauri-apps/api/core"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification"
 import { relaunch } from "@tauri-apps/plugin-process"
@@ -22,6 +21,7 @@ import { createMenu } from "./menu"
 import { initI18n, t } from "./i18n"
 import pkg from "../package.json"
 import "./styles.css"
+import { commands } from "./bindings"
 
 const root = document.getElementById("root")
 if (import.meta.env.DEV && !(root instanceof HTMLElement)) {
@@ -274,12 +274,12 @@ const createPlatform = (password: Accessor<string | null>): Platform => ({
 
   update: async () => {
     if (!UPDATER_ENABLED || !update) return
-    if (ostype() === "windows") await invoke("kill_sidecar").catch(() => undefined)
+    if (ostype() === "windows") await commands.killSidecar().catch(() => undefined)
     await update.install().catch(() => undefined)
   },
 
   restart: async () => {
-    await invoke("kill_sidecar").catch(() => undefined)
+    await commands.killSidecar().catch(() => undefined)
     await relaunch()
   },
 
@@ -348,83 +348,51 @@ const createPlatform = (password: Accessor<string | null>): Platform => ({
   },
 
   getDefaultServerUrl: async () => {
-    const result = await invoke<string | null>("get_default_server_url").catch(() => null)
+    const result = await commands.getDefaultServerUrl().catch(() => null)
     return result
   },
 
   setDefaultServerUrl: async (url: string | null) => {
-    await invoke("set_default_server_url", { url })
+    await commands.setDefaultServerUrl(url)
   },
 
-  parseMarkdown: async (markdown: string) => {
-    return invoke<string>("parse_markdown_command", { markdown })
-  },
+  parseMarkdown: (markdown: string) => commands.parseMarkdownCommand(markdown),
 
   canRemote: true,
 
   remoteConnect: async (opts) => {
-    const result = await invoke<{
-      url: string
-      password: string | null
-      session: {
-        id: string
-        target: string
-        repo: string
-        git_ref: string
-        port: number
-        local_port: number
-        started_at: string
-      }
-    }>("remote_connect", {
-      target: opts.target,
-      repo: opts.repo,
-      gitRef: opts.ref,
-      keyPath: opts.keyPath,
-    })
+    const result = await commands.remoteConnect(opts.target, opts.repo, opts.ref, opts.keyPath ?? null)
     console.log("[Desktop] remote_connect result:", JSON.stringify(result, null, 2))
     return result
   },
 
   remoteDisconnect: async () => {
-    await invoke("remote_disconnect")
+    await commands.remoteDisconnect()
   },
 
   remoteListSessions: async (target, keyPath) => {
-    return invoke("remote_list_sessions", { target, keyPath })
+    return commands.remoteListSessions(target, keyPath ?? null)
   },
 
   remoteStopSession: async (target, sessionId, keyPath) => {
-    await invoke("remote_stop_session", { target, sessionId, keyPath })
+    await commands.remoteStopSession(target, sessionId, keyPath ?? null)
   },
 
   remoteBrowseDirectory: async (target, path, keyPath) => {
-    return invoke("remote_browse_directory", { target, path, keyPath })
+    return commands.remoteBrowseDirectory(target, path, keyPath ?? null)
   },
 
   remoteConnectDirectory: async (opts) => {
-    const result = await invoke<{
-      url: string
-      password: string | null
-      session: {
-        id: string
-        target: string
-        repo: string
-        git_ref: string
-        port: number
-        local_port: number
-        started_at: string
-      }
-    }>("remote_connect_directory", {
-      target: opts.target,
-      path: opts.path,
-      keyPath: opts.keyPath,
-    })
+    const result = await commands.remoteConnectDirectory(opts.target, opts.path, opts.keyPath ?? null)
     console.log("[Desktop] remote_connect_directory result:", JSON.stringify(result, null, 2))
     return result
   },
+
   remoteCreateDirectory: async (target, path, keyPath) => {
-    return await invoke<string>("remote_create_directory", { target, path, keyPath })
+    return await commands.remoteCreateDirectory(target, path, keyPath ?? null)
   },
+
+  webviewZoom,
 })
 
 createMenu()
@@ -473,11 +441,7 @@ type ServerReadyData = { url: string; password: string | null }
 
 // Gate component that waits for the server to be ready
 function ServerGate(props: { children: (data: Accessor<ServerReadyData>) => JSX.Element }) {
-  const [serverData] = createResource<ServerReadyData>(() =>
-    invoke("ensure_server_ready").then((v) => {
-      return new Promise((res) => setTimeout(() => res(v as ServerReadyData), 2000))
-    }),
-  )
+  const [serverData] = createResource(() => commands.ensureServerReady())
 
   const errorMessage = () => {
     const error = serverData.error
@@ -488,7 +452,7 @@ function ServerGate(props: { children: (data: Accessor<ServerReadyData>) => JSX.
   }
 
   const restartApp = async () => {
-    await invoke("kill_sidecar").catch(() => undefined)
+    await commands.killSidecar().catch(() => undefined)
     await relaunch().catch(() => undefined)
   }
 

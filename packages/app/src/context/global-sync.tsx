@@ -17,7 +17,6 @@ import {
   type VcsInfo,
   type PermissionRequest,
   type QuestionRequest,
-  type AppSkillsResponse,
   createOpencodeClient,
 } from "@opencode-ai/sdk/v2/client"
 import { createStore, produce, reconcile, type SetStoreFunction, type Store } from "solid-js/store"
@@ -57,13 +56,10 @@ type ProjectMeta = {
   }
 }
 
-export type Skill = AppSkillsResponse[number]
-
 type State = {
   status: "loading" | "partial" | "complete"
   agent: Agent[]
   command: Command[]
-  skill: Skill[]
   project: string
   projectMeta: ProjectMeta | undefined
   icon: string | undefined
@@ -122,6 +118,8 @@ type IconCache = {
 type ChildOptions = {
   bootstrap?: boolean
 }
+
+const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 
 function normalizeProviderList(input: ProviderListResponse): ProviderListResponse {
   return {
@@ -302,7 +300,7 @@ function createGlobalSync() {
     const aUpdated = sessionUpdatedAt(a)
     const bUpdated = sessionUpdatedAt(b)
     if (aUpdated !== bUpdated) return bUpdated - aUpdated
-    return a.id.localeCompare(b.id)
+    return cmp(a.id, b.id)
   }
 
   function takeRecentSessions(sessions: Session[], limit: number, cutoff: number) {
@@ -330,7 +328,7 @@ function createGlobalSync() {
     const all = input
       .filter((s) => !!s?.id)
       .filter((s) => !s.time?.archived)
-      .sort((a, b) => a.id.localeCompare(b.id))
+      .sort((a, b) => cmp(a.id, b.id))
 
     const roots = all.filter((s) => !s.parentID)
     const children = all.filter((s) => !!s.parentID)
@@ -347,7 +345,7 @@ function createGlobalSync() {
       return sessionUpdatedAt(s) > cutoff
     })
 
-    return [...keepRoots, ...keepChildren].sort((a, b) => a.id.localeCompare(b.id))
+    return [...keepRoots, ...keepChildren].sort((a, b) => cmp(a.id, b.id))
   }
 
   function ensureChild(directory: string) {
@@ -393,7 +391,6 @@ function createGlobalSync() {
           status: "loading" as const,
           agent: [],
           command: [],
-          skill: [],
           session: [],
           sessionTotal: 0,
           session_status: {},
@@ -463,7 +460,7 @@ function createGlobalSync() {
         const nonArchived = (x.data ?? [])
           .filter((s) => !!s?.id)
           .filter((s) => !s.time?.archived)
-          .sort((a, b) => a.id.localeCompare(b.id))
+          .sort((a, b) => cmp(a.id, b.id))
 
         // Read the current limit at resolve-time so callers that bump the limit while
         // a request is in-flight still get the expanded result.
@@ -537,7 +534,6 @@ function createGlobalSync() {
           setStore("path", x.data!)
         }),
         sdk.command.list().then((x) => setStore("command", x.data ?? [])),
-        sdk.app.skills().then((x) => setStore("skill", x.data ?? [])),
         sdk.session.status().then((x) => setStore("session_status", x.data!)),
         loadSessions(directory),
         sdk.mcp.status().then((x) => setStore("mcp", x.data!)),
@@ -570,7 +566,7 @@ function createGlobalSync() {
                 "permission",
                 sessionID,
                 reconcile(
-                  permissions.filter((p) => !!p?.id).sort((a, b) => a.id.localeCompare(b.id)),
+                  permissions.filter((p) => !!p?.id).sort((a, b) => cmp(a.id, b.id)),
                   { key: "id" },
                 ),
               )
@@ -599,7 +595,7 @@ function createGlobalSync() {
                 "question",
                 sessionID,
                 reconcile(
-                  questions.filter((q) => !!q?.id).sort((a, b) => a.id.localeCompare(b.id)),
+                  questions.filter((q) => !!q?.id).sort((a, b) => cmp(a.id, b.id)),
                   { key: "id" },
                 ),
               )
@@ -997,7 +993,7 @@ function createGlobalSync() {
             .filter((p) => !!p?.id)
             .filter((p) => !!p.worktree && !p.worktree.includes("opencode-test"))
             .slice()
-            .sort((a, b) => a.id.localeCompare(b.id))
+            .sort((a, b) => cmp(a.id, b.id))
           setGlobalStore("project", projects)
         }),
       ),

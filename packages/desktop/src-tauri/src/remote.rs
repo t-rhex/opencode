@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
+use specta::Type;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug, Type)]
 #[serde(rename_all = "snake_case")]
 pub struct RemoteSession {
     pub id: String,
@@ -16,7 +17,7 @@ pub struct RemoteSession {
     pub started_at: String,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub struct RemoteConnectResult {
     pub url: String,
@@ -24,7 +25,7 @@ pub struct RemoteConnectResult {
     pub session: RemoteSession,
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DirectoryEntry {
     pub name: String,
@@ -32,7 +33,7 @@ pub struct DirectoryEntry {
     pub path: String,
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct BrowseResult {
     pub entries: Vec<DirectoryEntry>,
