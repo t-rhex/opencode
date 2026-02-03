@@ -172,7 +172,8 @@ export const TuiThreadCommand = cmd({
       })
       .option("remote", {
         type: "string",
-        describe: "SSH target for remote development (e.g., user@host:port)",
+        describe:
+          "SSH target or profile name for remote development (e.g., user@host:port or a profile from config.json)",
       })
       .option("identity", {
         type: "string",

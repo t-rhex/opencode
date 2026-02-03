@@ -15,6 +15,26 @@ export const RemoteCommand = cmd({
       .command(RemoteConnectCommand)
       .command(RemoteStopCommand)
       .command(RemoteStatusCommand)
-      .demandCommand(),
+      .demandCommand()
+      .epilog(
+        `Connection profiles can be configured in ~/.config/opencode/config.json:
+
+  {
+    "remote": {
+      "default": "myserver",
+      "profiles": {
+        "myserver": {
+          "host": "10.0.0.1",
+          "username": "deploy",
+          "port": 22,
+          "identity": "~/.ssh/id_ed25519",
+          "remoteDir": "/home/deploy/project"
+        }
+      }
+    }
+  }
+
+Then use: opencode --remote myserver`,
+      ),
   async handler() {},
 })
