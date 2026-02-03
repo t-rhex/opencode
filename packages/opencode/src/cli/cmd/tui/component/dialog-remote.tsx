@@ -4,7 +4,6 @@ import { useRemote } from "@tui/context/remote"
 import { useDialog } from "@tui/ui/dialog"
 import { useRoute } from "@tui/context/route"
 import { useToast } from "@tui/ui/toast"
-import { usePromptRef } from "@tui/context/prompt"
 import { DialogSelect } from "@tui/ui/dialog-select"
 
 export function DialogRemote() {
@@ -13,7 +12,6 @@ export function DialogRemote() {
   const dialog = useDialog()
   const route = useRoute()
   const toast = useToast()
-  const promptRef = usePromptRef()
   const client = sdk.client as any
 
   const [profiles, setProfiles] = createSignal<
@@ -32,12 +30,7 @@ export function DialogRemote() {
   })
 
   const home = () => {
-    const current = promptRef.current
-    const prompt = current?.current?.input ? current.current : undefined
-    route.navigate({
-      type: "home",
-      initialPrompt: prompt,
-    })
+    route.navigate({ type: "home" })
     dialog.clear()
   }
 
