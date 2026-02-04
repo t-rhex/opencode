@@ -45,21 +45,32 @@ export function DialogRemoteBrowse(props: { host?: string; port?: number }) {
     kv.set(`remote_last_dir:${props.host}:${props.port ?? 22}`, dir)
   }
 
+  const [error, setError] = createSignal<string | null>(null)
+
   const browse = async (path?: string) => {
     setLoading(true)
+    setError(null)
     const url = path ? `${sdk.url}/remote/browse?path=${encodeURIComponent(path)}` : `${sdk.url}/remote/browse`
     const res = await sdk
       .fetch(url)
-      .then((r) => r.json())
+      .then(async (r) => {
+        const text = await r.text()
+        try {
+          return JSON.parse(text)
+        } catch {
+          setError(`Invalid response: ${text.slice(0, 100)}`)
+          return null
+        }
+      })
       .catch((e: unknown) => {
         const msg = e instanceof Error ? e.message : String(e)
-        toast.show({ variant: "error", message: `Browse failed: ${msg}`, duration: 5000 })
+        setError(msg)
         return null
       })
     if (res && "current" in res) {
       setCurrent(res as BrowseResult)
     } else if (res && "error" in res) {
-      toast.show({ variant: "error", message: (res as { error: string }).error, duration: 5000 })
+      setError((res as { error: string }).error)
     }
     setLoading(false)
   }
@@ -92,9 +103,36 @@ export function DialogRemoteBrowse(props: { host?: string; port?: number }) {
   const options = () => {
     const data = current()
     if (!data) {
-      return loading()
-        ? [{ value: "loading", title: "Loading...", category: "Status", onSelect: () => {} }]
-        : [{ value: "error", title: "Failed to browse remote directory", category: "Status", onSelect: () => browse() }]
+      if (loading()) return [{ value: "loading", title: "Loading...", category: "Status", onSelect: () => {} }]
+      const err = error()
+      return [
+        {
+          value: "error",
+          title: "Failed to browse",
+          description: err ?? "Unknown error",
+          category: "Status",
+          onSelect: () => browse(),
+        },
+        {
+          value: "type-fallback",
+          title: "Type a path...",
+          description: "Enter an absolute path manually",
+          category: "Actions",
+          onSelect: () => {
+            dialog.replace(() => (
+              <DialogPrompt
+                title="Go to directory"
+                placeholder="/home/user/project"
+                onConfirm={(path) => {
+                  if (!path.trim()) return dialog.clear()
+                  setDirectory(path.trim())
+                }}
+                onCancel={() => dialog.replace(() => <DialogRemoteBrowse host={props.host} port={props.port} />)}
+              />
+            ))
+          },
+        },
+      ]
     }
 
     const items: Array<{
