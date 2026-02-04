@@ -11,6 +11,7 @@ import { Installation } from "@/installation"
 import { useTerminalDimensions } from "@opentui/solid"
 import { useArgs } from "@tui/context/args"
 import { useRemote } from "@tui/context/remote"
+import { useDirectory } from "@tui/context/directory"
 
 const Title = (props: { session: Accessor<Session> }) => {
   const { theme } = useTheme()
@@ -113,11 +114,12 @@ const ModeInfo = () => {
   const sync = useSync()
   const { theme } = useTheme()
 
-  // If remote, show git status alongside connection status
+  // If remote, show directory, git status, and connection status
   if (sync.data.path.remote) {
+    const directory = useDirectory()
     return (
       <box flexDirection="row" gap={1}>
-        <GitStatus />
+        <text fg={theme.textMuted}>{directory()}</text>
         <ConnectionStatus />
       </box>
     )

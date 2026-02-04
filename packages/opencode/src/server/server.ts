@@ -32,6 +32,7 @@ import { ConfigRoutes } from "./routes/config"
 import { ExperimentalRoutes } from "./routes/experimental"
 import { ProviderRoutes } from "./routes/provider"
 import { lazy } from "../util/lazy"
+import { GlobalBus } from "../bus/global"
 import { InstanceBootstrap } from "../project/bootstrap"
 import { Storage } from "../storage/storage"
 import type { ContentfulStatusCode } from "hono/utils/http-status"
@@ -530,14 +531,15 @@ export namespace Server {
                   properties: {},
                 }),
               })
-              const unsub = Bus.subscribeAll(async (event) => {
-                await stream.writeSSE({
-                  data: JSON.stringify(event),
+
+              // Use GlobalBus so events from any instance (including after
+              // remote connect / instance cache clear) are delivered.
+              const handler = (event: { payload: any }) => {
+                stream.writeSSE({
+                  data: JSON.stringify(event.payload),
                 })
-                if (event.type === Bus.InstanceDisposed.type) {
-                  stream.close()
-                }
-              })
+              }
+              GlobalBus.on("event", handler)
 
               // Send heartbeat every 30s to prevent WKWebView timeout (60s default)
               const heartbeat = setInterval(() => {
@@ -552,7 +554,7 @@ export namespace Server {
               await new Promise<void>((resolve) => {
                 stream.onAbort(() => {
                   clearInterval(heartbeat)
-                  unsub()
+                  GlobalBus.off("event", handler)
                   resolve()
                   log.info("event disconnected")
                 })

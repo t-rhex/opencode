@@ -1,6 +1,7 @@
 import { createSignal, onMount } from "solid-js"
 import { useSDK } from "@tui/context/sdk"
 import { useDialog } from "@tui/ui/dialog"
+import { useRoute } from "@tui/context/route"
 import { useToast } from "@tui/ui/toast"
 import { useKV } from "@tui/context/kv"
 import { DialogSelect } from "@tui/ui/dialog-select"
@@ -16,6 +17,7 @@ interface BrowseResult {
 export function DialogRemoteBrowse(props: { host?: string; port?: number }) {
   const sdk = useSDK()
   const dialog = useDialog()
+  const route = useRoute()
   const toast = useToast()
   const kv = useKV()
 
@@ -77,6 +79,8 @@ export function DialogRemoteBrowse(props: { host?: string; port?: number }) {
     saveRecent(result.directory)
     const git = result.hasGit ? " (git)" : ""
     toast.show({ variant: "success", message: `Working directory: ${result.directory}${git}` })
+    // Navigate to home so the next message starts a fresh session for this directory
+    route.navigate({ type: "home" })
   }
 
   onMount(() => browse())
@@ -133,17 +137,18 @@ export function DialogRemoteBrowse(props: { host?: string; port?: number }) {
     items.push({
       value: "create",
       title: "Create directory...",
-      description: "Create a new directory here",
+      description: "Create a new directory here or enter an absolute path",
       category: "Actions",
       onSelect: () => {
         dialog.replace(() => (
           <DialogPrompt
             title="Create directory"
-            placeholder="directory-name"
-            description={() => <text style={{ fg: "#808080" }}>Will be created at: {data.current}/</text>}
+            placeholder="directory-name or /absolute/path"
+            description={() => <text style={{ fg: "#808080" }}>Relative names created at: {data.current}/</text>}
             onConfirm={(name) => {
               if (!name.trim()) return dialog.clear()
-              const path = `${data.current === "/" ? "" : data.current}/${name.trim()}`
+              const trimmed = name.trim()
+              const path = trimmed.startsWith("/") ? trimmed : `${data.current === "/" ? "" : data.current}/${trimmed}`
               setDirectory(path, true)
             }}
             onCancel={() => dialog.replace(() => <DialogRemoteBrowse host={props.host} port={props.port} />)}

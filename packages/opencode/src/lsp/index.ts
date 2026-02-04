@@ -10,6 +10,7 @@ import { Config } from "../config/config"
 import { spawn } from "child_process"
 import { Instance } from "../project/instance"
 import { Flag } from "@/flag/flag"
+import { CurrentFilesystem } from "@/fs"
 
 export namespace LSP {
   const log = Log.create({ service: "lsp" })
@@ -81,6 +82,16 @@ export namespace LSP {
       const clients: LSPClient.Info[] = []
       const servers: Record<string, LSPServer.Info> = {}
       const cfg = await Config.get()
+
+      if (CurrentFilesystem.isRemote()) {
+        log.info("skipping LSP in remote mode")
+        return {
+          broken: new Set<string>(),
+          servers,
+          clients,
+          spawning: new Map<string, Promise<LSPClient.Info | undefined>>(),
+        }
+      }
 
       if (cfg.lsp === false) {
         log.info("all LSPs are disabled")

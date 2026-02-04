@@ -26,13 +26,21 @@ export function DialogSessionList() {
 
   const [searchResults] = createResource(search, async (query) => {
     if (!query) return undefined
-    const result = await sdk.client.session.list({ search: query, limit: 30 })
+    const dir = sync.data.path.remote ? sync.data.path.directory : undefined
+    const result = await sdk.client.session.list({ search: query, limit: 30, directory: dir })
     return result.data ?? []
   })
 
   const currentSessionID = createMemo(() => (route.data.type === "session" ? route.data.sessionID : undefined))
 
-  const sessions = createMemo(() => searchResults() ?? sync.data.session)
+  const sessions = createMemo(() => {
+    const results = searchResults() ?? sync.data.session
+    // In remote mode, only show sessions from the current directory
+    if (!sync.data.path.remote) return results
+    const dir = sync.data.path.directory
+    if (!dir) return results
+    return results.filter((s) => s.directory === dir)
+  })
 
   const options = createMemo(() => {
     const today = new Date().toDateString()

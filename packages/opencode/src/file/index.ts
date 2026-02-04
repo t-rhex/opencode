@@ -11,7 +11,7 @@ import { Instance } from "../project/instance"
 import { Ripgrep } from "./ripgrep"
 import fuzzysort from "fuzzysort"
 import { Global } from "../global"
-import { LocalFilesystem } from "../fs"
+import { CurrentFilesystem, LocalFilesystem } from "../fs"
 
 export namespace File {
   const log = Log.create({ service: "file" })
@@ -276,6 +276,15 @@ export namespace File {
     type Entry = { files: string[]; dirs: string[] }
     let cache: Entry = { files: [], dirs: [] }
     let fetching = false
+
+    if (CurrentFilesystem.isRemote()) {
+      log.info("skipping file scan in remote mode, tools will discover files on-demand")
+      return {
+        async files() {
+          return cache
+        },
+      }
+    }
 
     const isGlobalHome = Instance.directory === Global.Path.home && Instance.project.id === "global"
 

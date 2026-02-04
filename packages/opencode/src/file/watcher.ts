@@ -14,6 +14,7 @@ import type ParcelWatcher from "@parcel/watcher"
 import { $ } from "bun"
 import { Flag } from "@/flag/flag"
 import { readdir } from "fs/promises"
+import { CurrentFilesystem } from "@/fs"
 
 const SUBSCRIBE_TIMEOUT_MS = 10_000
 
@@ -47,6 +48,10 @@ export namespace FileWatcher {
   const state = Instance.state(
     async () => {
       if (Instance.project.vcs !== "git") return {}
+      if (CurrentFilesystem.isRemote()) {
+        log.info("skipping file watcher in remote mode")
+        return {}
+      }
       log.info("init")
       const cfg = await Config.get()
       const backend = (() => {

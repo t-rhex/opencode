@@ -210,6 +210,11 @@ export const rpc = {
     }
 
     Log.Default.info("remote filesystem connected", { host: config.host, port: config.port })
+
+    // Restart event stream with the remote directory so TUI receives events
+    const dir = config.remoteDir || `/home/${config.username}`
+    startEventStream(dir)
+
     return { connected: true }
   },
   async disconnectRemote() {

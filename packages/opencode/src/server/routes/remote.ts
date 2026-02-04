@@ -4,6 +4,7 @@ import z from "zod"
 import { CurrentFilesystem, RemoteFilesystem, LocalFilesystem, RemoteEvent } from "../../fs"
 import { Instance } from "../../project/instance"
 import { Bus } from "../../bus"
+import { GlobalBus } from "../../bus/global"
 import { Log } from "../../util/log"
 import { errors } from "../error"
 import { lazy } from "../../util/lazy"
@@ -166,6 +167,9 @@ export const RemoteRoutes = lazy(() =>
         CurrentFilesystem.setRemoteMode(true, dir)
         CurrentFilesystem.set(fs)
         Instance.clearCache()
+        GlobalBus.emit("event", {
+          payload: { type: "server.instance.disposed", properties: { directory: dir } },
+        })
 
         if (parsed.setupCommand) {
           log.info("running remote setup command", { command: parsed.setupCommand })
@@ -213,6 +217,9 @@ export const RemoteRoutes = lazy(() =>
         CurrentFilesystem.set(new LocalFilesystem())
         CurrentFilesystem.setRemoteMode(false)
         Instance.clearCache()
+        GlobalBus.emit("event", {
+          payload: { type: "server.instance.disposed", properties: { directory: process.cwd() } },
+        })
 
         log.info("remote filesystem disconnected")
 
@@ -566,6 +573,9 @@ export const RemoteRoutes = lazy(() =>
 
         CurrentFilesystem.setRemoteMode(true, dir)
         Instance.clearCache()
+        GlobalBus.emit("event", {
+          payload: { type: "server.instance.disposed", properties: { directory: dir } },
+        })
         log.info("remote working directory set", { directory: dir })
 
         return c.json({
