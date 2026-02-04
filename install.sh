@@ -52,9 +52,16 @@ resolve_version() {
     echo "$VERSION"
     return
   fi
+  # GitHub sorts releases by semver which breaks on multi-digit prerelease
+  # numbers (e.g. remote.10 < remote.8 lexicographically). Sort by
+  # published_at to get the truly newest release.
   local latest
-  latest=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases" \
-    | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"//;s/".*//')
+  latest=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases?per_page=100" \
+    | grep -E '"tag_name"|"published_at"' \
+    | paste - - \
+    | sort -t'"' -k8 -r \
+    | head -1 \
+    | sed 's/.*"tag_name": *"//;s/".*//')
   if [ -z "$latest" ]; then
     error "Could not determine latest version"
   fi
