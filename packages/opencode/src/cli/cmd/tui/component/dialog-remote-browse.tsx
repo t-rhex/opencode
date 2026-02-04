@@ -51,7 +51,11 @@ export function DialogRemoteBrowse(props: { host?: string; port?: number }) {
     const res = await sdk
       .fetch(url)
       .then((r) => r.json())
-      .catch(() => null)
+      .catch((e: unknown) => {
+        const msg = e instanceof Error ? e.message : String(e)
+        toast.show({ variant: "error", message: `Browse failed: ${msg}`, duration: 5000 })
+        return null
+      })
     if (res && "current" in res) {
       setCurrent(res as BrowseResult)
     } else if (res && "error" in res) {
@@ -89,8 +93,8 @@ export function DialogRemoteBrowse(props: { host?: string; port?: number }) {
     const data = current()
     if (!data) {
       return loading()
-        ? [{ value: "loading", title: "Loading...", disabled: true, onSelect: () => {} }]
-        : [{ value: "error", title: "Failed to browse", disabled: true, onSelect: () => {} }]
+        ? [{ value: "loading", title: "Loading...", category: "Status", onSelect: () => {} }]
+        : [{ value: "error", title: "Failed to browse remote directory", category: "Status", onSelect: () => browse() }]
     }
 
     const items: Array<{
