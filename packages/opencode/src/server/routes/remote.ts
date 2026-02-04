@@ -10,10 +10,22 @@ import { lazy } from "../../util/lazy"
 import { SSHConfig } from "../../util/ssh-config"
 import { Config } from "../../config/config"
 import { createServer, type Server } from "net"
+import { homedir } from "os"
+import { join } from "path"
+import { existsSync } from "fs"
 
 const log = Log.create({ service: "server.remote" })
 
 const tunnels = new Map<number, Server>()
+
+function defaultKey(): string | undefined {
+  const home = homedir()
+  for (const name of ["id_ed25519", "id_rsa", "id_ecdsa"]) {
+    const p = join(home, ".ssh", name)
+    if (existsSync(p)) return p
+  }
+  return undefined
+}
 
 function parseTarget(target: string, config: Config.Info) {
   const profile = config.remote?.profiles?.[target]
@@ -56,7 +68,7 @@ function parseTarget(target: string, config: Config.Info) {
     host: ssh.hostname ?? host,
     username: username ?? ssh.user ?? process.env.USER ?? "root",
     port: port ?? ssh.port ?? 22,
-    privateKeyPath: ssh.identityFile,
+    privateKeyPath: ssh.identityFile ?? defaultKey(),
     remoteDir: undefined as string | undefined,
     proxyJump: ssh.proxyJump,
     hostKeyCheck: config.remote?.hostKeyCheck,

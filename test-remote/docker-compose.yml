@@ -1,0 +1,12 @@
+services:
+  remote-dev:
+    build: .
+    container_name: opencode-remote-test
+    ports:
+      - "2223:22"
+    volumes:
+      - remote-data:/home/dev/project
+    restart: unless-stopped
+
+volumes:
+  remote-data:
