@@ -522,7 +522,7 @@ export function Prompt(props: PromptProps) {
       return
     }
 
-    // Quick-connect: /remote user@host bypasses dialog
+    // Quick-connect: /remote user@host or /remote user@host:port:/path
     if (trimmed.startsWith("/remote ")) {
       const target = trimmed.slice("/remote ".length).trim()
       if (target) {
@@ -538,10 +538,37 @@ export function Prompt(props: PromptProps) {
             body: JSON.stringify({ target }),
           })
           .then((res) => res.json())
-          .then((result: any) => {
+          .then(async (result: any) => {
             if (result.connected) {
               kv.set("remote_last_target", target)
-              toast.show({ variant: "success", message: `Connected to ${result.host}` })
+              const dir = result.remoteDir as string | undefined
+              // Check if there's a remembered directory for this host
+              const savedDir = kv.get(`remote_last_dir:${result.host}:${result.port ?? 22}`)
+              if (savedDir && savedDir !== dir) {
+                // Restore the remembered directory
+                await sdk
+                  .fetch(`${sdk.url}/remote/set-directory`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ directory: savedDir }),
+                  })
+                  .then((r) => r.json())
+                  .then((r: any) => {
+                    if (r.directory) {
+                      toast.show({ variant: "success", message: `Connected to ${result.host} (${r.directory})` })
+                      return
+                    }
+                    // Fallback to default dir if saved dir no longer exists
+                    toast.show({ variant: "success", message: `Connected to ${result.host} (${dir ?? "~"})` })
+                    toast.show({ variant: "info", message: "Type /dir to change working directory", duration: 5000 })
+                  })
+                  .catch(() => {
+                    toast.show({ variant: "success", message: `Connected to ${result.host} (${dir ?? "~"})` })
+                  })
+                return
+              }
+              toast.show({ variant: "success", message: `Connected to ${result.host} (${dir ?? "~"})` })
+              toast.show({ variant: "info", message: "Type /dir to change working directory", duration: 5000 })
               return
             }
             toast.show({ variant: "error", message: result.error ?? "Connection failed", duration: 10000 })

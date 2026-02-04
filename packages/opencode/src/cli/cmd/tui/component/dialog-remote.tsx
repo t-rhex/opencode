@@ -68,7 +68,19 @@ export function DialogRemote() {
     }))
     if ("connected" in result && result.connected) {
       kv.set("remote_last_target", target)
-      toast.show({ variant: "success", message: `Connected to ${result.host}` })
+      const dir = result.remoteDir as string | undefined
+      // Try to restore remembered directory for this host
+      const savedDir = kv.get(`remote_last_dir:${result.host}:${result.port ?? 22}`)
+      if (savedDir && savedDir !== dir) {
+        const restored = await api("/set-directory", "POST", { directory: savedDir }).catch(() => null)
+        if (restored && "directory" in restored) {
+          toast.show({ variant: "success", message: `Connected to ${result.host} (${restored.directory})` })
+          home()
+          return
+        }
+      }
+      toast.show({ variant: "success", message: `Connected to ${result.host} (${dir ?? "~"})` })
+      toast.show({ variant: "info", message: "Type /dir to change working directory", duration: 5000 })
       home()
       return
     }

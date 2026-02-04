@@ -94,6 +94,7 @@ export const RemoteRoutes = lazy(() =>
                     host: z.string(),
                     username: z.string(),
                     port: z.number(),
+                    remoteDir: z.string().optional(),
                   }),
                 ),
               },
@@ -144,20 +145,25 @@ export const RemoteRoutes = lazy(() =>
           return c.json({ error: `SSH connection failed: ${msg}` }, { status: 502 })
         }
 
-        if (parsed.remoteDir) {
-          const exists = await fs.exists(parsed.remoteDir)
+        let dir = parsed.remoteDir
+        if (dir) {
+          const exists = await fs.exists(dir)
           if (!exists) {
             await fs.disconnect()
-            return c.json({ error: `Remote directory does not exist: ${parsed.remoteDir}` }, { status: 400 })
+            return c.json({ error: `Remote directory does not exist: ${dir}` }, { status: 400 })
           }
-          const stat = await fs.stat(parsed.remoteDir)
+          const stat = await fs.stat(dir)
           if (!stat.isDirectory) {
             await fs.disconnect()
-            return c.json({ error: `Remote path is not a directory: ${parsed.remoteDir}` }, { status: 400 })
+            return c.json({ error: `Remote path is not a directory: ${dir}` }, { status: 400 })
           }
+        } else {
+          // Auto-detect home directory
+          const home = await fs.exec("echo $HOME").catch(() => null)
+          dir = home?.stdout?.trim() || `/home/${parsed.username}`
         }
 
-        CurrentFilesystem.setRemoteMode(true, parsed.remoteDir)
+        CurrentFilesystem.setRemoteMode(true, dir)
         CurrentFilesystem.set(fs)
         Instance.clearCache()
 
@@ -175,6 +181,7 @@ export const RemoteRoutes = lazy(() =>
           host: parsed.host,
           username: parsed.username,
           port: parsed.port,
+          remoteDir: dir,
         })
       },
     )
@@ -229,6 +236,7 @@ export const RemoteRoutes = lazy(() =>
                     host: z.string().optional(),
                     port: z.number().optional(),
                     username: z.string().optional(),
+                    remoteDir: z.string().optional(),
                   }),
                 ),
               },
@@ -248,6 +256,7 @@ export const RemoteRoutes = lazy(() =>
           host: state.host,
           port: state.port,
           username: undefined as string | undefined,
+          remoteDir: CurrentFilesystem.getRemoteDirectory(),
         })
       },
     )
@@ -425,6 +434,144 @@ export const RemoteRoutes = lazy(() =>
       }),
       async (c) => {
         return c.json([...tunnels.keys()])
+      },
+    )
+    .get(
+      "/browse",
+      describeRoute({
+        summary: "Browse remote directories",
+        description: "List directories at a given path on the remote filesystem.",
+        operationId: "remote.browse",
+        responses: {
+          200: {
+            description: "Directory listing",
+            content: {
+              "application/json": {
+                schema: resolver(
+                  z.object({
+                    current: z.string(),
+                    parent: z.string().nullable(),
+                    directories: z.string().array(),
+                    hasGit: z.boolean(),
+                  }),
+                ),
+              },
+            },
+          },
+          ...errors(400),
+        },
+      }),
+      async (c) => {
+        const fs = CurrentFilesystem.get()
+        if (!(fs instanceof RemoteFilesystem)) {
+          return c.json({ error: "Not connected to a remote server" }, { status: 400 })
+        }
+
+        const path = c.req.query("path") || CurrentFilesystem.getRemoteDirectory() || "~"
+        // Resolve ~ and relative paths — use eval to expand tilde
+        const cmd =
+          path === "~" || path.startsWith("~/")
+            ? `cd ~${path.slice(1)} 2>/dev/null && pwd`
+            : `cd ${JSON.stringify(path)} 2>/dev/null && pwd`
+        const resolved = await fs.exec(cmd).catch(() => null)
+        const dir = resolved?.stdout?.trim()
+        if (!dir) {
+          return c.json({ error: `Directory not found: ${path}` }, { status: 400 })
+        }
+
+        const [entries, gitCheck] = await Promise.all([
+          fs.readdir(dir),
+          fs.exec(`test -d ${JSON.stringify(dir + "/.git")} && echo yes || echo no`).catch(() => null),
+        ])
+
+        // Filter to directories only — use a single ls command for efficiency
+        const lsResult = await fs
+          .exec(
+            `cd ${JSON.stringify(dir)} && for d in ${entries.length > 0 ? entries.map((e) => JSON.stringify(e)).join(" ") : "''"} ; do [ -d "$d" ] && echo "$d"; done`,
+          )
+          .catch(() => null)
+        const directories = (lsResult?.stdout?.trim() || "")
+          .split("\n")
+          .filter((d) => d && !d.startsWith("."))
+          .sort()
+
+        const parent = dir === "/" ? null : dir.split("/").slice(0, -1).join("/") || "/"
+
+        return c.json({
+          current: dir,
+          parent,
+          directories,
+          hasGit: gitCheck?.stdout?.trim() === "yes",
+        })
+      },
+    )
+    .post(
+      "/set-directory",
+      describeRoute({
+        summary: "Set remote working directory",
+        description: "Change the working directory on the remote server.",
+        operationId: "remote.setDirectory",
+        responses: {
+          200: {
+            description: "Directory set successfully",
+            content: {
+              "application/json": {
+                schema: resolver(
+                  z.object({
+                    directory: z.string(),
+                    hasGit: z.boolean(),
+                  }),
+                ),
+              },
+            },
+          },
+          ...errors(400),
+        },
+      }),
+      validator(
+        "json",
+        z.object({
+          directory: z.string().meta({ description: "Absolute path to set as working directory" }),
+          create: z.boolean().optional().meta({ description: "Create the directory if it does not exist" }),
+        }),
+      ),
+      async (c) => {
+        const { directory, create } = c.req.valid("json")
+        const fs = CurrentFilesystem.get()
+        if (!(fs instanceof RemoteFilesystem)) {
+          return c.json({ error: "Not connected to a remote server" }, { status: 400 })
+        }
+
+        // Resolve the path
+        const resolved = await fs.exec(`cd ${JSON.stringify(directory)} 2>/dev/null && pwd`).catch(() => null)
+        let dir = resolved?.stdout?.trim()
+
+        if (!dir) {
+          if (!create) {
+            return c.json({ error: `Directory does not exist: ${directory}` }, { status: 400 })
+          }
+          const mkResult = await fs
+            .exec(`mkdir -p ${JSON.stringify(directory)} && cd ${JSON.stringify(directory)} && pwd`)
+            .catch(() => null)
+          dir = mkResult?.stdout?.trim()
+          if (!dir) {
+            return c.json({ error: `Failed to create directory: ${directory}` }, { status: 400 })
+          }
+          log.info("created remote directory", { directory: dir })
+        }
+
+        const gitCheck = await fs
+          .exec(`test -d ${JSON.stringify(dir + "/.git")} && echo yes || echo no`)
+          .catch(() => null)
+
+        CurrentFilesystem.setRemoteMode(true, dir)
+        Instance.clearCache()
+        log.info("remote working directory set", { directory: dir })
+
+        return c.json({
+          directory: dir,
+          hasGit: gitCheck?.stdout?.trim() === "yes",
+        })
       },
     )
     .get(

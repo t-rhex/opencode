@@ -14,6 +14,7 @@ import { DialogModel, useConnected } from "@tui/component/dialog-model"
 import { DialogMcp } from "@tui/component/dialog-mcp"
 import { DialogStatus } from "@tui/component/dialog-status"
 import { DialogRemote } from "@tui/component/dialog-remote"
+import { DialogRemoteBrowse } from "@tui/component/dialog-remote-browse"
 import { DialogThemeList } from "@tui/component/dialog-theme-list"
 import { DialogHelp } from "./ui/dialog-help"
 import { CommandProvider, useCommandDialog } from "@tui/component/dialog-command"
@@ -480,6 +481,18 @@ function App() {
       },
       onSelect: () => {
         dialog.replace(() => <DialogRemote />)
+      },
+    },
+    {
+      title: "Browse remote directory",
+      value: "remote.browse",
+      category: "System",
+      slash: {
+        name: "dir",
+        aliases: ["cd", "directory"],
+      },
+      onSelect: () => {
+        dialog.replace(() => <DialogRemoteBrowse />)
       },
     },
     {
