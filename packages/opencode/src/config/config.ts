@@ -20,7 +20,7 @@ import {
   printParseErrorCode,
 } from "jsonc-parser"
 import { Instance } from "../project/instance"
-import { CurrentFilesystem } from "../fs"
+import { CurrentFilesystem, LocalFilesystem } from "../fs"
 import { LSPServer } from "../lsp/server"
 import { BunProc } from "@/bun"
 import { Installation } from "@/installation"
@@ -118,7 +118,8 @@ export namespace Config {
     const directories = [
       Global.Path.config,
       // Scan project .opencode-remote/ directories when project discovery is enabled
-      ...(!Flag.OPENCODE_DISABLE_PROJECT_CONFIG
+      // Skip in remote mode since Filesystem.up() uses local fs and Instance.directory is a remote path
+      ...(!Flag.OPENCODE_DISABLE_PROJECT_CONFIG && !CurrentFilesystem.isRemote()
         ? await Array.fromAsync(
             Filesystem.up({
               targets: [".opencode-remote"],
@@ -1185,8 +1186,10 @@ export namespace Config {
 
   async function loadFile(filepath: string): Promise<Info> {
     log.info("loading", { path: filepath })
-    const fs = CurrentFilesystem.get()
-    let text = await fs.read(filepath).catch((err) => {
+    // Always read config files from local filesystem, even in remote mode.
+    // Config files like ~/.config/opencode-remote/ are local to the machine.
+    const local = new LocalFilesystem()
+    let text = await local.read(filepath).catch((err) => {
       if (err.code === "ENOENT") return
       throw new JsonError({ path: filepath }, { cause: err })
     })
