@@ -16,6 +16,13 @@ interface Profile {
   remoteDir?: string
 }
 
+interface SSHHost {
+  name: string
+  hostname?: string
+  user?: string
+  port?: number
+}
+
 export function DialogRemote() {
   const sdk = useSDK()
   const remote = useRemote()
@@ -25,6 +32,7 @@ export function DialogRemote() {
   const kv = useKV()
 
   const [profiles, setProfiles] = createSignal<Profile[]>([])
+  const [sshHosts, setSSHHosts] = createSignal<SSHHost[]>([])
   const [forwards, setForwards] = createSignal<number[]>([])
 
   const api = async (path: string, method = "GET", body?: unknown) => {
@@ -37,8 +45,13 @@ export function DialogRemote() {
   }
 
   onMount(async () => {
-    const [profileData, forwardData] = await Promise.all([api("/profiles"), api("/forwards")])
+    const [profileData, sshData, forwardData] = await Promise.all([
+      api("/profiles"),
+      api("/ssh-hosts"),
+      api("/forwards"),
+    ])
     if (Array.isArray(profileData)) setProfiles(profileData)
+    if (Array.isArray(sshData)) setSSHHosts(sshData)
     if (Array.isArray(forwardData)) setForwards(forwardData)
   })
 
@@ -97,6 +110,19 @@ export function DialogRemote() {
         description: p.username ? `${p.username}@${p.host}` : p.host,
         category: "Profile",
         onSelect: () => connect(p.name),
+      })
+    }
+
+    for (const h of sshHosts()) {
+      const host = h.hostname ?? h.name
+      if (connected && host === state!.host) continue
+      const desc = h.user ? `${h.user}@${host}` : host
+      items.push({
+        value: `ssh-${h.name}`,
+        title: `${label} "${h.name}"`,
+        description: h.hostname ? `${desc} (ssh config)` : "ssh config",
+        category: "SSH Config",
+        onSelect: () => connect(h.name),
       })
     }
 

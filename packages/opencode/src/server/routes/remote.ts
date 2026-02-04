@@ -414,5 +414,54 @@ export const RemoteRoutes = lazy(() =>
       async (c) => {
         return c.json([...tunnels.keys()])
       },
+    )
+    .get(
+      "/ssh-hosts",
+      describeRoute({
+        summary: "List SSH config hosts",
+        description: "List hosts from ~/.ssh/config that can be used as connection targets.",
+        operationId: "remote.sshHosts",
+        responses: {
+          200: {
+            description: "SSH config hosts",
+            content: {
+              "application/json": {
+                schema: resolver(
+                  z
+                    .object({
+                      name: z.string(),
+                      hostname: z.string().optional(),
+                      user: z.string().optional(),
+                      port: z.number().optional(),
+                    })
+                    .array(),
+                ),
+              },
+            },
+          },
+        },
+      }),
+      async (c) => {
+        const hosts = SSHConfig.parse()
+        const config = await Config.get()
+        const profiles = config.remote?.profiles ?? {}
+
+        const result = [...hosts.entries()]
+          .filter(([name]) => {
+            // Skip wildcard/glob patterns — not directly connectable
+            if (name === "*" || name.includes("*") || name.includes("?")) return false
+            // Skip if a profile with the same name already exists (profile takes priority)
+            if (profiles[name]) return false
+            return true
+          })
+          .map(([name, h]) => ({
+            name,
+            hostname: h.hostname,
+            user: h.user,
+            port: h.port,
+          }))
+
+        return c.json(result)
+      },
     ),
 )
