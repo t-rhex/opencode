@@ -12,6 +12,18 @@ import type { EventSource, RemoteStateSource } from "./context/sdk"
 import { SSHConfig } from "../../../util/ssh-config"
 import type { ConnectionState } from "@/fs"
 import { Config } from "@/config/config"
+import { existsSync } from "fs"
+import { homedir } from "os"
+import { join } from "path"
+
+function defaultKey(): string | undefined {
+  const home = homedir()
+  for (const name of ["id_ed25519", "id_rsa", "id_ecdsa"]) {
+    const p = join(home, ".ssh", name)
+    if (existsSync(p)) return p
+  }
+  return undefined
+}
 
 declare global {
   const OPENCODE_WORKER_PATH: string
@@ -119,7 +131,7 @@ async function resolveRemoteConfig(
       host: sshConfig.hostname ?? profile.host,
       username: profile.username ?? sshConfig.user ?? process.env.USER ?? "root",
       port: options.port ?? profile.port ?? sshConfig.port ?? 22,
-      privateKeyPath: options.identity ?? profile.identity ?? sshConfig.identityFile,
+      privateKeyPath: options.identity ?? profile.identity ?? sshConfig.identityFile ?? defaultKey(),
       remoteDir: options.remoteDir ?? profile.remoteDir,
       proxyJump: sshConfig.proxyJump,
       env: profile.env,
@@ -140,7 +152,7 @@ async function resolveRemoteConfig(
     host: sshConfig.hostname ?? parsed.host,
     username: parsed.username ?? sshConfig.user ?? process.env.USER ?? "root",
     port: options.port ?? parsed.port ?? sshConfig.port ?? 22,
-    privateKeyPath: options.identity ?? parsed.privateKeyPath ?? sshConfig.identityFile,
+    privateKeyPath: options.identity ?? parsed.privateKeyPath ?? sshConfig.identityFile ?? defaultKey(),
     remoteDir: options.remoteDir ?? parsed.remoteDir,
     proxyJump: sshConfig.proxyJump,
     hostKeyCheck: config.remote?.hostKeyCheck,
